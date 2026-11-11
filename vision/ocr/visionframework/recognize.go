@@ -8,10 +8,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/LouYuanbo1/neru-core/vision/ocr"
+	"github.com/LouYuanbo1/neru-core/vision/ocr/engine"
 )
 
-// Options are a Recognizer's defaults. The ocr.Options passed to Recognize win
+// Options are a Recognizer's defaults. The engine.Options passed to Recognize win
 // where they ask for something: a non-empty language list replaces Languages,
 // and a word-level request turns word level on. The recognition level lives
 // here because the call has no say over it; the confidence floor lives on the
@@ -30,14 +30,14 @@ type Options struct {
 	// what reading screen text wants.
 	Accurate bool
 
-	// WordLevel asks for one ocr.Word per word instead of one per line.
-	// Recognize answers at word level if the per-call ocr.Options asks for it,
+	// WordLevel asks for one engine.Word per word instead of one per line.
+	// Recognize answers at word level if the per-call engine.Options asks for it,
 	// whatever this is set to, so this is a default and not a cap.
 	WordLevel bool
 }
 
 // Recognizer recognizes text with the macOS Vision framework. It implements
-// ocr.Recognizer and ocr.HealthChecker.
+// engine.Recognizer and engine.HealthChecker.
 //
 // A Recognizer holds no native state: it is a set of defaults over a framework
 // bound once per process, so it is safe for concurrent use and costs nothing to
@@ -47,8 +47,8 @@ type Recognizer struct {
 }
 
 var (
-	_ ocr.Recognizer    = (*Recognizer)(nil)
-	_ ocr.HealthChecker = (*Recognizer)(nil)
+	_ engine.Recognizer    = (*Recognizer)(nil)
+	_ engine.HealthChecker = (*Recognizer)(nil)
 )
 
 // New returns a Recognizer with the given defaults.
@@ -96,7 +96,7 @@ func (r *Recognizer) Close() error {
 // but a finished or expired context returns errs.CodeTimeout or
 // errs.CodeContextCanceled and no words. A recognizable image with no text
 // returns no words and no error.
-func (r *Recognizer) Recognize(ctx context.Context, img *image.RGBA, opts ocr.Options) ([]ocr.Word, error) {
+func (r *Recognizer) Recognize(ctx context.Context, img *image.RGBA, opts engine.Options) ([]engine.Word, error) {
 	if err := contextError(ctx); err != nil {
 		return nil, err
 	}
@@ -124,7 +124,7 @@ func (r *Recognizer) Recognize(ctx context.Context, img *image.RGBA, opts ocr.Op
 	wordLevel := r.options.WordLevel || opts.WordLevel
 	minConfidence := opts.MinConfidence
 
-	var words []ocr.Word
+	var words []engine.Word
 
 	err = api.withPool(func() error {
 		accepted, langErr := api.normalizeLanguages(languages)
@@ -192,7 +192,7 @@ func (api *frameworks) recognizeText(
 	languages []string,
 	wordLevel bool,
 	minConfidence float64,
-) ([]ocr.Word, error) {
+) ([]engine.Word, error) {
 	request, err := api.newRequest("VNRecognizeTextRequest")
 	if err != nil {
 		return nil, err
@@ -217,7 +217,7 @@ func (api *frameworks) recognizeText(
 	}
 
 	observations := api.arrayItems(results)
-	words := make([]ocr.Word, 0, len(observations))
+	words := make([]engine.Word, 0, len(observations))
 
 	for _, observation := range observations {
 		// VNConfidence is a 32-bit float, unlike Vision's rectangle options,
@@ -243,7 +243,7 @@ func (api *frameworks) recognizeText(
 		if !wordLevel {
 			box := api.objc.msgSendRect(observation, api.selector("boundingBox"))
 			if rect := pixelRect(normalizedRectOf(box), bounds); !rect.Empty() {
-				words = append(words, ocr.Word{
+				words = append(words, engine.Word{
 					Text:       strings.TrimSpace(text),
 					Bounds:     rect,
 					Confidence: confidence,
@@ -260,7 +260,7 @@ func (api *frameworks) recognizeText(
 			}
 
 			if rect := pixelRect(normalizedRectOf(box), bounds); !rect.Empty() {
-				words = append(words, ocr.Word{
+				words = append(words, engine.Word{
 					Text:       span.Text,
 					Bounds:     rect,
 					Confidence: confidence,

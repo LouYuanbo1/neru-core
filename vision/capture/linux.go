@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/LouYuanbo1/neru-core/errs"
+	"github.com/LouYuanbo1/neru-core/vision/pixels"
 )
 
 // The Linux backend captures an X11 root window straight over the X wire
@@ -340,24 +341,24 @@ func (xc *xconn) close() { xc.conn.Close() }
 // captureX11Screen captures the whole root window. Origin is (0,0) and Region
 // the full bitmap. The platform entry point in linux_dispatch.go calls it only
 // on an X11 session.
-func captureX11Screen(ctx context.Context) (Shot, error) {
+func captureX11Screen(ctx context.Context) (pixels.Frame, error) {
 	xc, err := connect(ctx)
 	if err != nil {
-		return Shot{}, err
+		return pixels.Frame{}, err
 	}
 	defer xc.close()
 
 	rw, rh, err := xc.rootGeometry(ctx)
 	if err != nil {
-		return Shot{}, err
+		return pixels.Frame{}, err
 	}
 
 	img, err := xc.readImage(ctx, image.Rect(0, 0, rw, rh))
 	if err != nil {
-		return Shot{}, err
+		return pixels.Frame{}, err
 	}
 
-	return Shot{
+	return pixels.Frame{
 		Img:    img,
 		Origin: image.Point{},
 		Scale:  xc.scaleAt(),
@@ -368,14 +369,14 @@ func captureX11Screen(ctx context.Context) (Shot, error) {
 // captureX11Rect captures exactly the given logical region off the root window.
 // Origin is the region's top-left, Region the region itself. The platform entry
 // point in linux_dispatch.go calls it only on an X11 session.
-func captureX11Rect(ctx context.Context, region image.Rectangle) (Shot, error) {
+func captureX11Rect(ctx context.Context, region image.Rectangle) (pixels.Frame, error) {
 	if err := ctx.Err(); err != nil {
-		return Shot{}, errs.Wrap(ctx.Err(), errs.CodeContextCanceled, "capture canceled")
+		return pixels.Frame{}, errs.Wrap(ctx.Err(), errs.CodeContextCanceled, "capture canceled")
 	}
 
 	region = region.Canon()
 	if region.Empty() {
-		return Shot{}, errs.Newf(
+		return pixels.Frame{}, errs.Newf(
 			errs.CodeInvalidInput,
 			"region capture needs a region to capture; %v is empty",
 			region,
@@ -384,16 +385,16 @@ func captureX11Rect(ctx context.Context, region image.Rectangle) (Shot, error) {
 
 	xc, err := connect(ctx)
 	if err != nil {
-		return Shot{}, err
+		return pixels.Frame{}, err
 	}
 	defer xc.close()
 
 	img, err := xc.readImage(ctx, region)
 	if err != nil {
-		return Shot{}, err
+		return pixels.Frame{}, err
 	}
 
-	return Shot{
+	return pixels.Frame{
 		Img:    img,
 		Origin: region.Min,
 		Scale:  xc.scaleAt(),

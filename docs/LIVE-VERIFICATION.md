@@ -40,7 +40,7 @@ Manual checks:
    on macOS 14+; expect a Retina scale of 2, `Region` equal to the logical
    display bounds, and the test process's own windows absent from the image.
    On macOS 13 or older the fast path reports `CodeNotSupported` and the
-   `screencapture` fallback must still return a shot.
+   `screencapture` fallback must still return a frame.
 
 Known non-goals: `screencapture` includes the caller's own windows (no
 ScreenCaptureKit content filter yet), and the private SkyLight zoom symbols may

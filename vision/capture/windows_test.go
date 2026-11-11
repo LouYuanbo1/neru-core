@@ -8,11 +8,12 @@ import (
 	"testing"
 
 	"github.com/LouYuanbo1/neru-core/vision/capture"
+	"github.com/LouYuanbo1/neru-core/vision/pixels"
 )
 
 // captureShot pulls a screen shot, skipping on machines with no interactive
 // desktop so the suite stays green where capture legitimately cannot run.
-func captureShot(t *testing.T) capture.Shot {
+func captureShot(t *testing.T) pixels.Frame {
 	t.Helper()
 
 	shot, err := capture.CaptureScreen(context.Background())

@@ -13,6 +13,7 @@ import (
 	kwincapture "github.com/LouYuanbo1/neru-core/vision/capture/kwin"
 	portalcapture "github.com/LouYuanbo1/neru-core/vision/capture/portal"
 	waylandcapture "github.com/LouYuanbo1/neru-core/vision/capture/wayland"
+	"github.com/LouYuanbo1/neru-core/vision/pixels"
 )
 
 // This file chooses the session's capture transport.
@@ -37,75 +38,65 @@ import (
 // (a protocol fault, a timeout, bad input) stops the chain.
 
 // captureScreen returns the active screen.
-func captureScreen(ctx context.Context) (Shot, error) {
+func captureScreen(ctx context.Context) (pixels.Frame, error) {
 	if !waylandcapture.Available() {
 		return captureX11Screen(ctx)
 	}
 
-	if frame, err := waylandcapture.CaptureScreen(ctx); err == nil {
-		return shot(frame.Img, frame.Origin, frame.Scale, frame.Region), nil
+	if f, err := waylandcapture.CaptureScreen(ctx); err == nil {
+		return f, nil
 	} else if !nativeFallback(err) {
-		return Shot{}, err
+		return pixels.Frame{}, err
 	}
 
 	if desktopIs("kde") && kwincapture.Available() {
-		if frame, err := kwincapture.CaptureScreen(ctx); err == nil {
-			return shot(frame.Img, frame.Origin, frame.Scale, frame.Region), nil
+		if f, err := kwincapture.CaptureScreen(ctx); err == nil {
+			return f, nil
 		} else if !nativeFallback(err) {
-			return Shot{}, err
+			return pixels.Frame{}, err
 		}
 	}
 
 	if desktopIs("gnome") && gnomecapture.Available() {
-		if frame, err := gnomecapture.CaptureScreen(ctx); err == nil {
-			return shot(frame.Img, frame.Origin, frame.Scale, frame.Region), nil
+		if f, err := gnomecapture.CaptureScreen(ctx); err == nil {
+			return f, nil
 		} else if !nativeFallback(err) {
-			return Shot{}, err
+			return pixels.Frame{}, err
 		}
 	}
 
-	frame, err := portalcapture.CaptureScreen(ctx)
-	if err != nil {
-		return Shot{}, err
-	}
-
-	return shot(frame.Img, frame.Origin, frame.Scale, frame.Region), nil
+	return portalcapture.CaptureScreen(ctx)
 }
 
 // captureRect returns exactly region.
-func captureRect(ctx context.Context, region image.Rectangle) (Shot, error) {
+func captureRect(ctx context.Context, region image.Rectangle) (pixels.Frame, error) {
 	if !waylandcapture.Available() {
 		return captureX11Rect(ctx, region)
 	}
 
-	if frame, err := waylandcapture.CaptureRect(ctx, region); err == nil {
-		return shot(frame.Img, frame.Origin, frame.Scale, frame.Region), nil
+	if f, err := waylandcapture.CaptureRect(ctx, region); err == nil {
+		return f, nil
 	} else if !nativeFallback(err) {
-		return Shot{}, err
+		return pixels.Frame{}, err
 	}
 
 	if desktopIs("kde") && kwincapture.Available() {
-		if frame, err := kwincapture.CaptureRect(ctx, region); err == nil {
-			return shot(frame.Img, frame.Origin, frame.Scale, frame.Region), nil
+		if f, err := kwincapture.CaptureRect(ctx, region); err == nil {
+			return f, nil
 		} else if !nativeFallback(err) {
-			return Shot{}, err
+			return pixels.Frame{}, err
 		}
 	}
 
 	if desktopIs("gnome") && gnomecapture.Available() {
-		if frame, err := gnomecapture.CaptureRect(ctx, region); err == nil {
-			return shot(frame.Img, frame.Origin, frame.Scale, frame.Region), nil
+		if f, err := gnomecapture.CaptureRect(ctx, region); err == nil {
+			return f, nil
 		} else if !nativeFallback(err) {
-			return Shot{}, err
+			return pixels.Frame{}, err
 		}
 	}
 
-	frame, err := portalcapture.CaptureRect(ctx, region)
-	if err != nil {
-		return Shot{}, err
-	}
-
-	return shot(frame.Img, frame.Origin, frame.Scale, frame.Region), nil
+	return portalcapture.CaptureRect(ctx, region)
 }
 
 // nativeFallback reports whether a compositor-native refusal is worth retrying
@@ -130,9 +121,4 @@ func desktopIs(family string) bool {
 	}
 
 	return strings.Contains(strings.ToLower(desktop), family)
-}
-
-// shot adapts a capture backend's frame to this package's Shot.
-func shot(img *image.RGBA, origin image.Point, scale float64, region image.Rectangle) Shot {
-	return Shot{Img: img, Origin: origin, Scale: scale, Region: region}
 }

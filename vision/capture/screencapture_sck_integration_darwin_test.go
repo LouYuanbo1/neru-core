@@ -8,6 +8,8 @@ import (
 	"math"
 	"testing"
 	"time"
+
+	"github.com/LouYuanbo1/neru-core/vision/pixels"
 )
 
 // This file holds the live tests: they read the real screen of the machine
@@ -20,12 +22,12 @@ import (
 // checked by hand: with Neru's overlay on screen, compare the captured pixels
 // under it with and without the overlay. What is asserted here automatically is
 // that a capture succeeds, covers the display it names, comes back at the
-// display's backing scale, and clips a region the way the Shot contract says.
+// display's backing scale, and clips a region the way the frame contract says.
 
 // wholeShot captures the main display and fails the test when the fast path is
 // unavailable, so the region test below can be sure it is measuring the same
 // path a caller gets.
-func wholeShot(t *testing.T) Shot {
+func wholeShot(t *testing.T) pixels.Frame {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)

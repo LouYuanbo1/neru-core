@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/LouYuanbo1/neru-core/element"
-	"github.com/LouYuanbo1/neru-core/vision/ocr"
+	"github.com/LouYuanbo1/neru-core/vision/ocr/engine"
 )
 
 // RegionsFromWords maps recognized words onto the desktop's global top-left
@@ -28,7 +28,7 @@ import (
 // region or image with no area has no mapping, so nothing is returned rather
 // than boxes in the wrong space.
 func RegionsFromWords(
-	words []ocr.Word,
+	words []engine.Word,
 	region image.Rectangle,
 	imageBounds image.Rectangle,
 	minConfidence float64,

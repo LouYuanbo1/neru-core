@@ -10,7 +10,8 @@ import (
 	"github.com/LouYuanbo1/neru-core/element"
 	"github.com/LouYuanbo1/neru-core/errs"
 	"github.com/LouYuanbo1/neru-core/vision/contour"
-	"github.com/LouYuanbo1/neru-core/vision/ocr"
+	"github.com/LouYuanbo1/neru-core/vision/ocr/engine"
+	"github.com/LouYuanbo1/neru-core/vision/pixels"
 )
 
 // Defaults for the text-and-rectangles pipeline. They are the values the
@@ -30,7 +31,7 @@ const (
 // one (Apple's Vision framework is the notable case) can hand the pipeline its
 // native rectangle pass instead of the pure-Go contour detector.
 //
-// Boxes answers in the image's pixel space, like ocr.Word.Bounds: pixels of
+// Boxes answers in the image's pixel space, like engine.Word.Bounds: pixels of
 // img, top-left origin. The pipeline maps them onto the desktop itself.
 type BoxFinder interface {
 	Boxes(ctx context.Context, img *image.RGBA) ([]image.Rectangle, error)
@@ -79,7 +80,7 @@ func (o RectangleOptions) normalized() RectangleOptions {
 type Pipeline struct {
 	// Text is the recognizer the text half runs. Required when DetectText is
 	// true; the pipeline never guesses an engine, so an import stays opt-in.
-	Text ocr.Recognizer
+	Text engine.Recognizer
 	// Boxes is an optional native rectangle detector. Nil means the pure-Go
 	// contour detector, whose thresholds come from Params.
 	Boxes BoxFinder
@@ -119,9 +120,8 @@ type Pipeline struct {
 // the text target keeps its label and its confidence. A rectangle failure is
 // tolerated when text succeeded; a text failure fails the call, because the
 // text half is the reason the strategy exists.
-func (p *Pipeline) Detect(ctx context.Context, frame Frame) ([]*element.Element, error) {
-	f := frame
-	if err := f.checkRegion(ctx, StrategyVision); err != nil {
+func (p *Pipeline) Detect(ctx context.Context, f pixels.Frame) ([]*element.Element, error) {
+	if err := checkRegion(ctx, &f, StrategyVision); err != nil {
 		return nil, err
 	}
 
@@ -140,7 +140,7 @@ func (p *Pipeline) Detect(ctx context.Context, frame Frame) ([]*element.Element,
 	}
 
 	if p.DetectText {
-		if err := ocr.Health(ctx, p.Text); err != nil {
+		if err := engine.Health(ctx, p.Text); err != nil {
 			return nil, err
 		}
 	}
@@ -158,7 +158,7 @@ func (p *Pipeline) Detect(ctx context.Context, frame Frame) ([]*element.Element,
 	var text []DetectedRegion
 
 	if p.DetectText {
-		words, err := p.Text.Recognize(pipelineCtx, f.Img, ocr.Options{
+		words, err := p.Text.Recognize(pipelineCtx, f.Img, engine.Options{
 			WordLevel:     p.WordLevel,
 			MinConfidence: p.MinConfidence,
 		})
@@ -201,7 +201,7 @@ func (p *Pipeline) Health(ctx context.Context) error {
 		)
 	}
 
-	return ocr.Health(ctx, p.Text)
+	return engine.Health(ctx, p.Text)
 }
 
 // mergeIOU returns the configured threshold or the shipped default.
@@ -218,7 +218,7 @@ func (p *Pipeline) mergeIOU() float64 {
 // starting a goroutine.
 func (p *Pipeline) startRectangles(
 	ctx context.Context,
-	frame Frame,
+	f pixels.Frame,
 ) func() ([]DetectedRegion, error) {
 	if !p.DetectRectangles {
 		return func() ([]DetectedRegion, error) { return nil, nil }
@@ -234,14 +234,14 @@ func (p *Pipeline) startRectangles(
 	done := make(chan result, 1)
 
 	go func() {
-		boxes, err := p.rectangleBoxes(ctx, frame)
+		boxes, err := p.rectangleBoxes(ctx, f)
 		if err != nil {
 			done <- result{nil, err}
 
 			return
 		}
 
-		done <- result{filterRectangles(boxes, frame, options), nil}
+		done <- result{filterRectangles(boxes, f, options), nil}
 	}()
 
 	return func() ([]DetectedRegion, error) {
@@ -254,7 +254,7 @@ func (p *Pipeline) startRectangles(
 // rectangleBoxes returns rectangle candidates in desktop coordinates: the
 // contour fallback's frame-local boxes are offset by the frame origin, and a
 // native finder's image-pixel boxes go through pixelRectToRegion.
-func (p *Pipeline) rectangleBoxes(ctx context.Context, frame Frame) ([]image.Rectangle, error) {
+func (p *Pipeline) rectangleBoxes(ctx context.Context, frame pixels.Frame) ([]image.Rectangle, error) {
 	if p.Boxes != nil {
 		boxes, err := p.Boxes.Boxes(ctx, frame.Img)
 		if err != nil {
@@ -264,7 +264,7 @@ func (p *Pipeline) rectangleBoxes(ctx context.Context, frame Frame) ([]image.Rec
 		converted := make([]image.Rectangle, 0, len(boxes))
 
 		for _, box := range boxes {
-			converted = append(converted, frame.pixelRectToRegion(box))
+			converted = append(converted, pixelRectToRegion(frame, box))
 		}
 
 		return converted, nil
@@ -295,7 +295,7 @@ func (p *Pipeline) rectangleBoxes(ctx context.Context, frame Frame) ([]image.Rec
 // detector scores none; every kept box scores one for the same reason.
 func filterRectangles(
 	boxes []image.Rectangle,
-	frame Frame,
+	frame pixels.Frame,
 	options RectangleOptions,
 ) []DetectedRegion {
 	options = options.normalized()
@@ -373,7 +373,7 @@ func rectArea(bounds image.Rectangle) int {
 
 // pixelRectToRegion converts a rectangle from the image's pixel space to the
 // desktop region the frame covers.
-func (f Frame) pixelRectToRegion(box image.Rectangle) image.Rectangle {
+func pixelRectToRegion(f pixels.Frame, box image.Rectangle) image.Rectangle {
 	if f.Img == nil || f.Region.Empty() {
 		return image.Rectangle{}
 	}

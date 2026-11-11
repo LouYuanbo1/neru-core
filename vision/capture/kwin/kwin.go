@@ -80,9 +80,9 @@
 // descriptor is errs.CodeInternal. Nothing here logs pixels, image bytes or
 // window contents, and no frame outlives the call that asked for it.
 //
-// This package deliberately does not import vision/capture. The wiring in
-// vision/capture/linux_dispatch.go converts a Frame into that package's Shot,
-// and importing back would be a cycle.
+// This package deliberately does not import vision/capture: the capture
+// facade imports this package to select it, so importing back would be a
+// cycle. What both sides exchange is pixels.Frame, the type both depend on.
 package kwin
 
 import (
@@ -91,6 +91,7 @@ import (
 	"time"
 
 	"github.com/LouYuanbo1/neru-core/errs"
+	"github.com/LouYuanbo1/neru-core/vision/pixels"
 )
 
 // requestBudget bounds one capture: the bus connection, the interface probe, the
@@ -142,9 +143,9 @@ func Available() bool {
 // A session without KWin reports errs.CodeNotSupported, KWin refusing the frame
 // reports errs.CodeAccessibilityDenied, and a KWin that stops answering reports
 // errs.CodeTimeout.
-func CaptureScreen(ctx context.Context) (Frame, error) {
+func CaptureScreen(ctx context.Context) (pixels.Frame, error) {
 	if err := checkContext(ctx); err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 
 	return grabScreen(ctx)
@@ -154,7 +155,7 @@ func CaptureScreen(ctx context.Context) (Frame, error) {
 //
 // The region is clipped to the compositor's layout when that layout can be read,
 // so a rectangle that hangs off the desktop asks KWin only for the part that
-// exists. Region in the returned Frame is the area the pixels actually cover,
+// exists. Region in the returned pixels.Frame is the area the pixels actually cover,
 // which is the clipped request narrowed again if KWin returned fewer pixels than
 // it promised, and Origin is that area's top-left.
 //
@@ -162,14 +163,14 @@ func CaptureScreen(ctx context.Context) (Frame, error) {
 // the whole screen, as the wlroots backend refuses it, because vision bounds its
 // results by the region and an empty one would silently read as "the whole
 // screen". A region entirely outside the desktop is refused the same way.
-func CaptureRect(ctx context.Context, region image.Rectangle) (Frame, error) {
+func CaptureRect(ctx context.Context, region image.Rectangle) (pixels.Frame, error) {
 	if err := checkContext(ctx); err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 
 	region = region.Canon()
 	if region.Empty() {
-		return Frame{}, errs.Newf(
+		return pixels.Frame{}, errs.Newf(
 			errs.CodeInvalidInput,
 			"region capture needs a region to capture; %v is empty",
 			region,

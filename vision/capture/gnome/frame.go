@@ -2,30 +2,10 @@ package gnome
 
 import (
 	"image"
-	"image/draw"
 	"math"
 
-	"github.com/LouYuanbo1/neru-core/errs"
+	"github.com/LouYuanbo1/neru-core/vision/pixels"
 )
-
-// Frame is one captured screen area: the pixels, where they belong on the
-// desktop, and the scale between the two.
-type Frame struct {
-	// Img is the captured pixels in RGBA, its rectangle anchored at (0,0).
-	Img *image.RGBA
-	// Origin is where the frame's top-left corner sits on the desktop, in
-	// logical pixels. It is the layout's origin when the compositor's layout
-	// could be read, and the origin of the coordinate system otherwise.
-	Origin image.Point
-	// Scale is frame pixels per logical pixel, at least 1. GNOME Shell's
-	// screenshot method reports no scale, so it is derived from the picture's
-	// width and the layout when that layout is readable, and is 1 otherwise.
-	Scale float64
-	// Region is the logical desktop area the frame covers. Img holds that area
-	// at Scale, so Region.Dx()*Scale is the image's width whenever the shell's
-	// picture and the compositor's layout agree.
-	Region image.Rectangle
-}
 
 // layout is the logical desktop the compositor reports: the union of its
 // outputs' rectangles. known is false when no layout could be read, which is the
@@ -56,11 +36,11 @@ type layout struct {
 // The approximation is reported rather than refused because the portal has the
 // same gap on this desktop, and a readable picture of part of the desktop beats
 // errs.CodeNotSupported.
-func placeDesktop(img *image.RGBA, l layout) Frame {
+func placeDesktop(img *image.RGBA, l layout) pixels.Frame {
 	size := img.Rect.Size()
 
 	if !l.known || l.bounds.Empty() {
-		return Frame{
+		return pixels.Frame{
 			Img:    img,
 			Origin: image.Point{},
 			Scale:  1,
@@ -68,7 +48,7 @@ func placeDesktop(img *image.RGBA, l layout) Frame {
 		}
 	}
 
-	scale := deriveScale(size.X, l.bounds.Dx())
+	scale := pixels.DeriveScale(size.X, l.bounds.Dx())
 
 	// The pixels describe this much of the layout at that scale. Clipping to the
 	// layout keeps a picture that is smaller than it, because the shell scaled it
@@ -80,103 +60,10 @@ func placeDesktop(img *image.RGBA, l layout) Frame {
 		l.bounds.Min.Y+int(math.Round(float64(size.Y)/scale)),
 	)
 
-	return Frame{
+	return pixels.Frame{
 		Img:    img,
 		Origin: l.bounds.Min,
 		Scale:  scale,
 		Region: covered.Intersect(l.bounds),
 	}
-}
-
-// deriveScale computes frame pixels per logical pixel from the PNG's width and
-// the layout's logical width. The layout's logical size is a quotient of the
-// compositor's mode and the output scale, rounded to a whole pixel, so the ratio
-// is rounded to two decimals to recover 1.5 rather than 1.4997.
-//
-// A ratio below 1 is clamped to 1, which is what Frame promises. That only
-// happens when the shell answered with fewer pixels than the desktop has logical
-// columns, and placeDesktop then reports the smaller region the pixels actually
-// cover.
-//
-// A desktop whose outputs use different scales has no single ratio; Mutter
-// captures the whole stage at one scale, so the whole width is the right thing
-// to divide by and the result is exact when that scale is uniform.
-func deriveScale(frameWidth, logicalWidth int) float64 {
-	if frameWidth <= 0 || logicalWidth <= 0 {
-		return 1
-	}
-
-	scale := float64(frameWidth) / float64(logicalWidth)
-	if scale < 1 {
-		return 1
-	}
-
-	return math.Round(scale*100) / 100
-}
-
-// crop returns the part of frame that covers region, a logical desktop
-// rectangle. Region is region intersected with the frame's own region and
-// Origin is that intersection's top-left, so a caller that asked for a window
-// hanging off the desktop gets the pixels that exist and can see that they were
-// clipped.
-//
-// The pixel rectangle is derived from the logical offset through the frame's
-// scale and then clipped to the image, because rounding at a fractional scale
-// can ask for a row or column the image does not have.
-func crop(frame Frame, region image.Rectangle) (Frame, error) {
-	clipped := region.Canon().Intersect(frame.Region)
-	if clipped.Empty() {
-		return Frame{}, errs.Newf(
-			errs.CodeInvalidInput,
-			"region %v lies outside the captured desktop %v",
-			region,
-			frame.Region,
-		)
-	}
-
-	pixels := pixelRect(clipped, frame.Region.Min, frame.Scale, frame.Img.Rect)
-	if pixels.Empty() {
-		return Frame{}, errs.Newf(
-			errs.CodeInvalidInput,
-			"region %v maps to no pixel of the captured desktop %v at scale %v",
-			region,
-			frame.Region,
-			frame.Scale,
-		)
-	}
-
-	return Frame{
-		Img:    cropImage(frame.Img, pixels),
-		Origin: clipped.Min,
-		Scale:  frame.Scale,
-		Region: clipped,
-	}, nil
-}
-
-// pixelRect maps a logical rectangle inside a frame onto the frame's pixels.
-// min is the frame's logical origin and bounds is the image, which the result
-// is clipped to.
-func pixelRect(logical image.Rectangle, min image.Point, scale float64, bounds image.Rectangle) image.Rectangle {
-	if scale <= 0 {
-		scale = 1
-	}
-
-	pixels := image.Rect(
-		int(math.Round(float64(logical.Min.X-min.X)*scale)),
-		int(math.Round(float64(logical.Min.Y-min.Y)*scale)),
-		int(math.Round(float64(logical.Max.X-min.X)*scale)),
-		int(math.Round(float64(logical.Max.Y-min.Y)*scale)),
-	)
-
-	return pixels.Intersect(bounds)
-}
-
-// cropImage copies pixels out of src into a new image anchored at (0,0), so a
-// cropped frame does not keep the whole screenshot alive and its rectangle
-// starts where a caller expects it to.
-func cropImage(src *image.RGBA, pixels image.Rectangle) *image.RGBA {
-	dst := image.NewRGBA(image.Rect(0, 0, pixels.Dx(), pixels.Dy()))
-	draw.Draw(dst, dst.Rect, src, pixels.Min, draw.Src)
-
-	return dst
 }

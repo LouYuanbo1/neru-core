@@ -5,7 +5,7 @@ import (
 	"image"
 	"testing"
 
-	"github.com/LouYuanbo1/neru-core/vision/ocr"
+	"github.com/LouYuanbo1/neru-core/vision/ocr/engine"
 )
 
 // tsvSample is a synthetic tesseract TSV: a header, two words on one line, and
@@ -95,15 +95,15 @@ func TestLanguageOption_PerCallWins(t *testing.T) {
 
 	recognizer := New(Options{Languages: []string{"eng"}})
 
-	if got := recognizer.languageOption(ocr.Options{}); got != "eng" {
+	if got := recognizer.languageOption(engine.Options{}); got != "eng" {
 		t.Errorf("languageOption() = %q, want eng", got)
 	}
 
-	if got := recognizer.languageOption(ocr.Options{Languages: []string{"chi_sim", "eng"}}); got != "chi_sim+eng" {
+	if got := recognizer.languageOption(engine.Options{Languages: []string{"chi_sim", "eng"}}); got != "chi_sim+eng" {
 		t.Errorf("languageOption(per-call) = %q, want chi_sim+eng", got)
 	}
 
-	if got := (&Recognizer{}).languageOption(ocr.Options{}); got != "" {
+	if got := (&Recognizer{}).languageOption(engine.Options{}); got != "" {
 		t.Errorf("languageOption(no languages) = %q, want empty", got)
 	}
 }

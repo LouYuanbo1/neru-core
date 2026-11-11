@@ -9,8 +9,13 @@ import (
 
 // New returns the Linux AT-SPI backend.
 func New(opts Options) (ax.Client, error) {
+	roles, err := opts.clickableRoles()
+	if err != nil {
+		return nil, err
+	}
+
 	client, err := linux.New(linux.Options{
-		ClickableRoles:    opts.ClickableRoles,
+		ClickableRoles:    roles,
 		MaxDepth:          opts.MaxDepth,
 		MaxNodes:          opts.MaxNodes,
 		DisableCompositor: opts.DisableCompositor,

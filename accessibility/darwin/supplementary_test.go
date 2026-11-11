@@ -7,6 +7,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/LouYuanbo1/neru-core/accessibility/ax"
 	"github.com/LouYuanbo1/neru-core/errs"
 )
 
@@ -14,21 +15,21 @@ func TestSpecForSurface_CarriesEachSurfaceRules(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		surface    Surface
+		surface    ax.Surface
 		bundleID   string
 		extraRoles []string
 		depth      int
 		appRoot    bool
 	}{
-		{surface: SurfaceDock, bundleID: "com.apple.dock", extraRoles: []string{"AXDockItem"}, depth: dockTreeDepth, appRoot: true},
+		{surface: ax.SurfaceDock, bundleID: "com.apple.dock", extraRoles: []string{"AXDockItem"}, depth: dockTreeDepth, appRoot: true},
 		{
-			surface:    SurfaceNotificationCenter,
+			surface:    ax.SurfaceNotificationCenter,
 			bundleID:   "com.apple.notificationcenterui",
 			extraRoles: []string{"AXGroup"},
 		},
-		{surface: SurfaceStageManager, bundleID: windowManagerBundleID, depth: stageManagerTreeDepth, appRoot: true},
-		{surface: SurfacePictureInPicture, bundleID: "com.apple.PIPAgent", depth: flatAppTreeDepth},
-		{surface: SurfaceScreenCaptureUI, bundleID: "com.apple.screencaptureui", depth: flatAppTreeDepth},
+		{surface: ax.SurfaceStageManager, bundleID: windowManagerBundleID, depth: stageManagerTreeDepth, appRoot: true},
+		{surface: ax.SurfacePictureInPicture, bundleID: "com.apple.PIPAgent", depth: flatAppTreeDepth},
+		{surface: ax.SurfaceScreenCaptureUI, bundleID: "com.apple.screencaptureui", depth: flatAppTreeDepth},
 	}
 
 	for _, testCase := range tests {
@@ -58,7 +59,7 @@ func TestSpecForSurface_CarriesEachSurfaceRules(t *testing.T) {
 		})
 	}
 
-	if _, ok := specForSurface(Surface("nope")); ok {
+	if _, ok := specForSurface(ax.Surface("nope")); ok {
 		t.Error("an unknown surface must not resolve to a spec")
 	}
 }
@@ -90,7 +91,7 @@ func TestSurfaceNodes_RejectsAnUnknownSurface(t *testing.T) {
 
 	client := &Client{}
 
-	_, err := client.SurfaceNodes(context.Background(), Surface("not-a-surface"), nil, 0)
+	_, err := client.SurfaceNodes(context.Background(), ax.Surface("not-a-surface"), nil, 0)
 	if !errs.IsCode(err, errs.CodeInvalidInput) {
 		t.Fatalf("SurfaceNodes error = %v, want CodeInvalidInput", err)
 	}
@@ -106,7 +107,7 @@ func TestSurfaceNodes_ReportsAMissingSurfaceProcess(t *testing.T) {
 	}
 	defer client.Close()
 
-	_, err = client.SurfaceNodes(context.Background(), SurfacePictureInPicture, nil, 0)
+	_, err = client.SurfaceNodes(context.Background(), ax.SurfacePictureInPicture, nil, 0)
 	if err != nil && !errs.IsCode(err, errs.CodeElementNotFound) {
 		t.Fatalf("SurfaceNodes error = %v, want nil or CodeElementNotFound", err)
 	}

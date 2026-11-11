@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/LouYuanbo1/neru-core/errs"
-	"github.com/LouYuanbo1/neru-core/vision/ocr"
+	"github.com/LouYuanbo1/neru-core/vision/ocr/engine"
 )
 
 // These are the only tests that run Windows.Media.Ocr. Everything else about the
@@ -91,7 +91,7 @@ func TestIntegration_Recognize_BlankFrameIsNotAnError(t *testing.T) {
 	defer cancel()
 
 	for _, wordLevel := range []bool{true, false} {
-		words, err := recognizer.Recognize(ctx, img, ocr.Options{WordLevel: wordLevel})
+		words, err := recognizer.Recognize(ctx, img, engine.Options{WordLevel: wordLevel})
 		if err != nil {
 			t.Fatalf("Recognize(WordLevel=%v) on a blank frame: %v", wordLevel, err)
 		}
@@ -114,7 +114,7 @@ func TestIntegration_Recognize_ReadsTheFixture(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	words, err := recognizer.Recognize(ctx, img, ocr.Options{WordLevel: true})
+	words, err := recognizer.Recognize(ctx, img, engine.Options{WordLevel: true})
 	if err != nil {
 		t.Fatalf("Recognize: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestIntegration_Recognize_ReadsTheFixture(t *testing.T) {
 		t.Errorf("recognized %d runs, none of them the fixture's word", len(words))
 	}
 
-	lines, err := recognizer.Recognize(ctx, img, ocr.Options{})
+	lines, err := recognizer.Recognize(ctx, img, engine.Options{})
 	if err != nil {
 		t.Fatalf("Recognize(line level): %v", err)
 	}
@@ -183,7 +183,7 @@ func TestIntegration_Recognize_AcceptsAFrameWiderThanTheEngineLimit(t *testing.T
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	words, err := recognizer.Recognize(ctx, img, ocr.Options{WordLevel: true})
+	words, err := recognizer.Recognize(ctx, img, engine.Options{WordLevel: true})
 	if err != nil {
 		t.Fatalf("Recognize on a 3840-wide frame: %v", err)
 	}
@@ -206,14 +206,14 @@ func TestIntegration_Recognize_HonorsTheBudget(t *testing.T) {
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if _, err := recognizer.Recognize(canceled, img, ocr.Options{}); !errs.IsCode(err, errs.CodeContextCanceled) {
+	if _, err := recognizer.Recognize(canceled, img, engine.Options{}); !errs.IsCode(err, errs.CodeContextCanceled) {
 		t.Errorf("canceled context code = %s, want %s", errs.GetCode(err), errs.CodeContextCanceled)
 	}
 
 	expired, cancelExpired := context.WithTimeout(context.Background(), time.Nanosecond)
 	defer cancelExpired()
 
-	if _, err := recognizer.Recognize(expired, img, ocr.Options{}); !errs.IsCode(err, errs.CodeTimeout) {
+	if _, err := recognizer.Recognize(expired, img, engine.Options{}); !errs.IsCode(err, errs.CodeTimeout) {
 		t.Errorf("expired deadline code = %s, want %s", errs.GetCode(err), errs.CodeTimeout)
 	}
 }
@@ -247,7 +247,7 @@ func TestIntegration_Health_LanguageWithoutAPack(t *testing.T) {
 
 	// Recognize must answer the same way, so a caller that skips Health is not
 	// told something different.
-	if _, err := recognizer.Recognize(ctx, loadFixture(t, filepath.Join("testdata", "hello.png")), ocr.Options{}); !errs.IsNotSupported(err) {
+	if _, err := recognizer.Recognize(ctx, loadFixture(t, filepath.Join("testdata", "hello.png")), engine.Options{}); !errs.IsNotSupported(err) {
 		t.Errorf("Recognize with an uninstalled language code = %s, want %s",
 			errs.GetCode(err), errs.CodeNotSupported)
 	}
@@ -264,7 +264,7 @@ func TestIntegration_Recognize_PerCallLanguageOverrides(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	words, err := recognizer.Recognize(ctx, img, ocr.Options{
+	words, err := recognizer.Recognize(ctx, img, engine.Options{
 		Languages: []string{"en-US"},
 		WordLevel: true,
 	})

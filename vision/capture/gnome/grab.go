@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/LouYuanbo1/neru-core/errs"
+	"github.com/LouYuanbo1/neru-core/vision/pixels"
 )
 
 // grab runs one screenshot request and returns the frame it produced: the
@@ -19,7 +20,7 @@ import (
 // when the compositor answers more slowly than the shell does. The interface is
 // checked before the request so a shell that does not export Screenshot is
 // reported as unsupported instead of being asked a question it cannot answer.
-func grab(ctx context.Context) (Frame, error) {
+func grab(ctx context.Context) (pixels.Frame, error) {
 	ctx, cancel := withBudget(ctx)
 	defer cancel()
 
@@ -27,28 +28,28 @@ func grab(ctx context.Context) (Frame, error) {
 
 	conn, err := dialSessionBus(ctx)
 	if err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 	defer conn.Close()
 
 	if err := requireScreenshot(ctx, conn); err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 
 	dir, filename, err := tempTarget()
 	if err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 	defer os.RemoveAll(dir)
 
 	used, err := callScreenshot(ctx, conn, filename)
 	if err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 
 	resolved, err := resultPath(used, filename)
 	if err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 
 	// The shell is supposed to write the file this package named. If it wrote
@@ -56,7 +57,7 @@ func grab(ctx context.Context) (Frame, error) {
 	// left alone and the capture is reported as failed rather than silently
 	// returning pixels of an unknown part of the desktop.
 	if !insideDir(dir, resolved) {
-		return Frame{}, errs.New(
+		return pixels.Frame{}, errs.New(
 			errs.CodeInternal,
 			"GNOME Shell wrote the screenshot somewhere other than the temporary "+
 				"file this package named, so it was left alone instead of read",
@@ -65,7 +66,7 @@ func grab(ctx context.Context) (Frame, error) {
 
 	img, err := decodePNG(resolved)
 	if err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 
 	// The picture has been decoded, so the copy on disk is no longer needed; the
@@ -77,7 +78,7 @@ func grab(ctx context.Context) (Frame, error) {
 	// meanwhile, and returning pixels nobody waits for would report a capture
 	// that the caller already counts as canceled.
 	if err := checkContext(ctx); err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 
 	return placeDesktop(img, <-probed), nil

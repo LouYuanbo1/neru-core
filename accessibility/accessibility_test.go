@@ -129,7 +129,7 @@ func TestSurfaceNodes_RefusesABackendWithoutSurfaces(t *testing.T) {
 	}
 	defer client.Close()
 
-	nodes, err := accessibility.SurfaceNodes(context.Background(), client, accessibility.SurfaceDock, nil, 1)
+	nodes, err := accessibility.SurfaceNodes(context.Background(), client, ax.SurfaceDock, nil, 1)
 	if runtime.GOOS == element.GOOSDarwin {
 		// macOS does implement the Dock; this test only pins the contract for
 		// the platforms that do not. A live macOS run may return nodes.

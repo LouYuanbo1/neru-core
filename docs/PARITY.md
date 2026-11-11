@@ -114,11 +114,11 @@ only for what it uses:
 | `accessibility/{darwin,linux,windows}` | one platform's native bindings |
 | `accessibility/linux/compositor` | D-Bus/CLI compositor bridge (Linux only) |
 | `element`, `action`, `errs` | pure Go, no native bindings |
-| `vision`, `vision/contour`, `vision/segment`, `vision/frame` | pure Go detectors and pipeline |
+| `vision`, `vision/contour`, `vision/segment`, `vision/pixels` | pure Go detectors and pipeline |
 | `vision/capture` | platform capture; `vision/capture/wayland` only on Linux |
-| `vision/ocr` | contract only |
+| `vision/ocr` | platform selector; pulls that platform's engine |
+| `vision/ocr/engine` | contract only |
 | `vision/ocr/{winrt,tesseract,visionframework}` | one recognizer engine each |
-| `vision/ocr/auto` | picks the platform's engine at run time |
 | `internal/*` | implementation details, not importable outside the module |
 
 ## Verification commands

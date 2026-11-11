@@ -7,7 +7,7 @@ import (
 	"math"
 
 	"github.com/LouYuanbo1/neru-core/errs"
-	pixels "github.com/LouYuanbo1/neru-core/vision/frame"
+	"github.com/LouYuanbo1/neru-core/vision/pixels"
 )
 
 // component is one 8-connected blob of dilated edge pixels with its place in

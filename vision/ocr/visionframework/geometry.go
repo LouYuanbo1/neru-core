@@ -8,7 +8,7 @@ import (
 	"sort"
 	"unicode"
 
-	"github.com/LouYuanbo1/neru-core/vision/ocr"
+	"github.com/LouYuanbo1/neru-core/vision/ocr/engine"
 )
 
 // normalizedRect is one rectangle as Vision reports it: the origin at the
@@ -32,7 +32,7 @@ func normalizedRectOf(box cgRect) normalizedRect {
 }
 
 // pixelRect maps a Vision rectangle onto pixels of the image bounds describes,
-// which is what the ocr contract asks for: (0,0) at the image's top-left
+// which is what the engine contract asks for: (0,0) at the image's top-left
 // corner with y growing downward. bounds supplies the image's size only; its
 // own origin is ignored, because Vision's coordinates are relative to the
 // image and never to where the image sits on screen.
@@ -153,7 +153,7 @@ func wordSpans(text string) []wordSpan {
 // differ by no more than half the shorter box's height, the tolerance the
 // original daemon used: Vision returns words of one line with different
 // heights, so an exact center match would split them into separate lines.
-func sortReadingOrder(words []ocr.Word) {
+func sortReadingOrder(words []engine.Word) {
 	if len(words) < 2 {
 		return
 	}
@@ -183,7 +183,7 @@ func sortReadingOrder(words []ocr.Word) {
 }
 
 // sameLine reports whether two word boxes sit on one line.
-func sameLine(a, b ocr.Word) bool {
+func sameLine(a, b engine.Word) bool {
 	tolerance := math.Min(
 		float64(a.Bounds.Dy()),
 		float64(b.Bounds.Dy()),

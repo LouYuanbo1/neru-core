@@ -1,12 +1,12 @@
 //go:build linux
 
-package auto
+package ocr
 
 import (
 	"context"
 
 	"github.com/LouYuanbo1/neru-core/errs"
-	"github.com/LouYuanbo1/neru-core/vision/ocr"
+	"github.com/LouYuanbo1/neru-core/vision/ocr/engine"
 	"github.com/LouYuanbo1/neru-core/vision/ocr/tesseract"
 )
 
@@ -17,7 +17,7 @@ import (
 // installed but a `tesseract` executable is, the CLI recognizer is used
 // instead; when neither exists the error names both remedies and is
 // errs.CodeNotSupported, so a caller can degrade deliberately.
-func New() (ocr.Recognizer, error) {
+func New() (engine.Recognizer, error) {
 	library, libraryErr := tesseract.NewLibrary(tesseract.LibraryOptions{})
 	if libraryErr == nil {
 		return library, nil

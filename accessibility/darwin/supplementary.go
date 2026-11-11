@@ -9,30 +9,6 @@ import (
 	"github.com/LouYuanbo1/neru-core/errs"
 )
 
-// Surface names one of the auxiliary surfaces macOS draws in its own process,
-// which a hint session scans besides the frontmost window. Each one is a real
-// accessibility tree, so a hint placed on it clicks the same control a user
-// would.
-//
-// It is an alias of ax.Surface, so the method below satisfies
-// ax.SurfaceProvider and a caller can reach it through
-// accessibility.SurfaceNodes without a platform-specific import.
-type Surface = ax.Surface
-
-const (
-	// SurfaceDock is the Dock's item strip.
-	SurfaceDock = ax.SurfaceDock
-	// SurfaceNotificationCenter is the notification list and its widgets.
-	SurfaceNotificationCenter = ax.SurfaceNotificationCenter
-	// SurfaceStageManager is the WindowManager application's stage strip.
-	SurfaceStageManager = ax.SurfaceStageManager
-	// SurfacePictureInPicture is the Picture-in-Picture agent's playback
-	// controls.
-	SurfacePictureInPicture = ax.SurfacePictureInPicture
-	// SurfaceScreenCaptureUI is the small toolbar the screen-capture UI shows.
-	SurfaceScreenCaptureUI = ax.SurfaceScreenCaptureUI
-)
-
 // Depths each surface is walked to. They are the values the daemon this backend
 // was extracted from uses, and each is the shallowest depth that reaches the
 // surface's controls: the Dock is flat under its application element, the
@@ -68,9 +44,9 @@ type surfaceSpec struct {
 }
 
 // specForSurface returns the collection rules for a surface.
-func specForSurface(surface Surface) (surfaceSpec, bool) {
+func specForSurface(surface ax.Surface) (surfaceSpec, bool) {
 	switch surface {
-	case SurfaceDock:
+	case ax.SurfaceDock:
 		// The Dock is a flat application tree of AXDockItem children, and a
 		// hint on one of them launches or switches to the application.
 		return surfaceSpec{
@@ -79,29 +55,33 @@ func specForSurface(surface Surface) (surfaceSpec, bool) {
 			depth:      dockTreeDepth,
 			appRoot:    true,
 		}, true
-	case SurfaceNotificationCenter:
+	case ax.SurfaceNotificationCenter:
 		// Most of a notification is drawn as AXGroup, which is not a clickable
 		// role by default, so it is added here.
 		return surfaceSpec{
 			bundleID:   notificationCenterBundleID,
 			extraRoles: []string{"AXGroup"},
 		}, true
-	case SurfaceStageManager:
+	case ax.SurfaceStageManager:
 		return surfaceSpec{
 			bundleID: windowManagerBundleID,
 			depth:    stageManagerTreeDepth,
 			appRoot:  true,
 		}, true
-	case SurfacePictureInPicture:
+	case ax.SurfacePictureInPicture:
 		return surfaceSpec{bundleID: pipBundleID, depth: flatAppTreeDepth}, true
-	case SurfaceScreenCaptureUI:
+	case ax.SurfaceScreenCaptureUI:
 		return surfaceSpec{bundleID: screenCaptureBundleID, depth: flatAppTreeDepth}, true
 	default:
 		return surfaceSpec{}, false
 	}
 }
 
-// SurfaceNodes returns the clickable nodes of one supplementary surface.
+// SurfaceNodes returns the clickable nodes of one supplementary surface: the
+// Dock, Notification Center, Stage Manager, Picture-in-Picture or the
+// screen-capture UI, named with the ax.Surface constants. Each one is a real
+// accessibility tree, so a hint placed on it clicks the same control a user
+// would.
 //
 // roles replaces the client's configured clickable roles for this call; empty
 // means the client's roles plus the extra roles the surface itself exposes
@@ -113,7 +93,7 @@ func specForSurface(surface Surface) (surfaceSpec, bool) {
 // errs.CodeInvalidInput.
 func (c *Client) SurfaceNodes(
 	ctx context.Context,
-	surface Surface,
+	surface ax.Surface,
 	roles []string,
 	maxDepth int,
 ) ([]ax.Node, error) {

@@ -74,7 +74,7 @@
 //
 // # Word level and line level
 //
-// Lines are the default: one ocr.Word per recognized text observation, with
+// Lines are the default: one engine.Word per recognized text observation, with
 // the observation's boundingBox. With WordLevel, each observation's top
 // candidate string is split into whitespace-delimited runs in Go, and each
 // run's box is read with boundingBoxForRange:error: using UTF-16 ranges, so
@@ -94,7 +94,7 @@
 // # Coordinates and confidence
 //
 // Bounds are pixels of the image passed in, with (0,0) at its top-left
-// corner, matching the ocr contract. Vision reports normalized rectangles with
+// corner, matching the engine contract. Vision reports normalized rectangles with
 // a bottom-left origin, which pixelRect converts, rounds to whole pixels and
 // clips to the image. Only the image's size is used, so a subimage's Rect.Min
 // never leaks into a result. A rectangle that clips away to nothing is

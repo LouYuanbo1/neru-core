@@ -10,6 +10,7 @@ import (
 	"unsafe"
 
 	"github.com/LouYuanbo1/neru-core/errs"
+	"github.com/LouYuanbo1/neru-core/vision/pixels"
 )
 
 // This file captures the screen through GDI only: BitBlt off the desktop DC
@@ -202,9 +203,9 @@ func monitorAt(hmon uintptr) screen {
 // captureScreen captures the whole display under the cursor. Origin is that
 // display's logical top-left, Region its logical bounds, and Scale its own, so
 // the shot is exactly the active screen.
-func captureScreen(ctx context.Context) (Shot, error) {
+func captureScreen(ctx context.Context) (pixels.Frame, error) {
 	if err := ctxCancelled(ctx); err != nil {
-		return Shot{}, err
+		return pixels.Frame{}, err
 	}
 
 	ensurePerMonitorV2()
@@ -212,10 +213,10 @@ func captureScreen(ctx context.Context) (Shot, error) {
 
 	img, err := capturePhysical(ctx, mon.phys)
 	if err != nil {
-		return Shot{}, err
+		return pixels.Frame{}, err
 	}
 
-	return Shot{
+	return pixels.Frame{
 		Img:    img,
 		Origin: divPoint(mon.phys.Min, mon.scale),
 		Scale:  mon.scale,
@@ -227,14 +228,14 @@ func captureScreen(ctx context.Context) (Shot, error) {
 // top-left corner, Region is the region itself, so a frame built from the shot
 // sits where the caller asked. The region is measured with the scale of the
 // monitor that contains its center.
-func captureRect(ctx context.Context, region image.Rectangle) (Shot, error) {
+func captureRect(ctx context.Context, region image.Rectangle) (pixels.Frame, error) {
 	if err := ctxCancelled(ctx); err != nil {
-		return Shot{}, err
+		return pixels.Frame{}, err
 	}
 
 	region = region.Canon()
 	if region.Empty() {
-		return Shot{}, errs.Newf(
+		return pixels.Frame{}, errs.Newf(
 			errs.CodeInvalidInput,
 			"region capture needs a region to capture; %v is empty",
 			region,
@@ -245,10 +246,10 @@ func captureRect(ctx context.Context, region image.Rectangle) (Shot, error) {
 	phys := scaleRect(region, scale)
 	img, err := capturePhysical(ctx, phys)
 	if err != nil {
-		return Shot{}, err
+		return pixels.Frame{}, err
 	}
 
-	return Shot{
+	return pixels.Frame{
 		Img:    img,
 		Origin: region.Min,
 		Scale:  scale,

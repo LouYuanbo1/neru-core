@@ -20,12 +20,89 @@ go get github.com/LouYuanbo1/neru-core
 
 Requires Go 1.27.3 or newer, the version in `go.mod`.
 
+## Quick start
+
+### Read the text on screen
+
+```go
+import (
+	"context"
+
+	"github.com/LouYuanbo1/neru-core/vision"
+	"github.com/LouYuanbo1/neru-core/vision/capture"
+	"github.com/LouYuanbo1/neru-core/vision/ocr"
+)
+
+ctx := context.Background()
+
+recognizer, err := ocr.New() // the engine this system provides
+if err != nil {
+	return err
+}
+
+frame, err := capture.CaptureScreen(ctx)
+if err != nil {
+	return err
+}
+
+text, err := vision.ReadText(ctx, frame, recognizer, nil)
+```
+
+### List what is clickable
+
+```go
+import "github.com/LouYuanbo1/neru-core/accessibility"
+
+client, err := accessibility.New(accessibility.Options{})
+if err != nil {
+	return err
+}
+defer client.Close()
+
+window, err := client.FrontmostWindow(ctx)
+if err != nil {
+	return err
+}
+defer window.Release()
+
+nodes, err := client.ClickableNodes(ctx, window, nil, 0, true)
+if err != nil {
+	return err
+}
+defer accessibility.ReleaseNodes(nodes)
+
+for _, elem := range accessibility.FromNodes(nodes) {
+	fmt.Println(elem.Role(), elem.Text(), elem.Bounds())
+}
+```
+
+### Click the element nearest the cursor
+
+```go
+import (
+	"github.com/LouYuanbo1/neru-core/action"
+	"github.com/LouYuanbo1/neru-core/element"
+)
+
+target, ok := element.Nearest(
+	accessibility.FromNodes(nodes),
+	client.CursorPosition(),
+	client.ActiveScreenBounds(),
+)
+if !ok {
+	return errors.New("nothing to click")
+}
+
+// The third argument, restoreCursor, puts the pointer back afterwards.
+err := client.PerformAction(action.TypeLeftClick, target.Point, true, 0)
+```
+
 ## What is here
 
 | Package | What it does |
 | --- | --- |
-| `accessibility` | Platform selector and the neutral-node conversion: `New`, `FromNode`, `FromNodes`, `SurfaceNodes`. |
-| `accessibility/ax` | The backend contract (`Client`, `Window`, `App`, `Node`, `SurfaceProvider`). |
+| `accessibility` | Platform selector and the neutral-node conversion: `New`, `FromNode`, `FromNodes`, `SurfaceNodes`, `WarmUp`. |
+| `accessibility/ax` | The backend contract (`Client`, `Window`, `App`, `Node`, `Surface`, `SurfaceProvider`). |
 | `accessibility/darwin` | macOS backend: AXUIElement through ApplicationServices, CGEvent input, Dock/Notification Center/Stage Manager/PiP/screen-capture UI, Mission Control, Accessibility Zoom, bundle-type detection — all via `purego`. |
 | `accessibility/windows` | Windows backend: UI Automation through COM, input through `SendInput`. |
 | `accessibility/linux` | Linux backend: AT-SPI over D-Bus, input through X11/XTest, Wayland input through wlroots/libei, all via `purego`. |
@@ -34,180 +111,501 @@ Requires Go 1.27.3 or newer, the version in `go.mod`.
 | `action` | Platform-neutral mouse action model and modifier bitmask. |
 | `errs` | Small error vocabulary with codes (`CodeNotSupported`, `CodeAccessibilityFailed`, …). |
 | `vision` | Turns captured pixels into elements: `Pipeline` (OCR + rectangles + merge + classify), contour and segment detectors, region merging, `ReadText`. |
-| `vision/capture` | Screen capture per platform: GDI on Windows, X11 root / wlr-screencopy / desktop-portal fallback on Linux, `screencapture` on macOS. |
-| `vision/ocr` | The recognizer contract (`Recognizer`, `Word`, `Health`). |
+| `vision/capture` | Screen capture per platform: GDI on Windows, X11 root / wlr-screencopy / desktop-portal fallback on Linux, ScreenCaptureKit on macOS 14+ with a `screencapture` fallback. |
+| `vision/ocr` | The facade: `New` returns the OCR engine the operating system provides, or the system-wide tesseract installation that stands in for it on Linux. |
+| `vision/ocr/engine` | The engine contract (`Recognizer`, `Word`, `Options`, `Health`). |
 | `vision/ocr/winrt`, `vision/ocr/tesseract`, `vision/ocr/visionframework` | One engine per package: Windows.Media.Ocr, libtesseract (in-process via `purego`, or the CLI), Apple's Vision framework (text, rectangles, saliency). |
-| `vision/ocr/auto` | The running platform's built-in recognizer. |
-| `vision/contour`, `vision/segment`, `vision/frame` | The pure-Go detectors and the pixel plumbing they share. |
+| `vision/contour`, `vision/segment`, `vision/pixels` | The pure-Go detectors, and the `Frame` type plus the pixel operations they share. |
 
-## Reading the accessibility tree
+## Accessibility
+
+### Creating a client
+
+`accessibility.New` picks the backend for the running platform and returns the
+`ax.Client` contract, so call sites never mention a platform package.
 
 ```go
-import (
-	"context"
-	"fmt"
-
-	"github.com/LouYuanbo1/neru-core/accessibility"
-)
-
-ctx := context.Background()
-
-client, err := accessibility.New(accessibility.Options{})
-if err != nil {
-	return err
-}
+client, err := accessibility.New(accessibility.Options{
+	Roles:      []element.Role{element.RoleButton, element.RoleLink},
+	MaxDepth:   12,
+	MaxNodes:   4000,
+	SkipHitTest: true, // macOS only
+})
 defer client.Close()
+```
 
+| Option | Meaning | Platform |
+| --- | --- | --- |
+| `Roles` | Neutral roles to scan for; translated to native names before the backend starts. | all |
+| `ClickableRoles` | Native role names, appended verbatim; the escape hatch for names with no neutral equivalent. | all |
+| `MaxDepth` | Bound on the tree walk below the root. Zero means the backend default. | all |
+| `MaxNodes` | Bound on how many nodes one walk visits. Zero means the backend default. | all |
+| `SkipHitTest` | Skip the per-element visibility hit test, trading precision for one round trip per candidate. | macOS |
+| `SmoothSteps` | Intermediate move events a cursor move posts; zero moves instantly. | macOS |
+| `SmoothDelay` | Pause between those move events. | macOS |
+| `DisableCompositor` | Do not talk to KWin/GNOME Shell/compositor CLIs; fall back to AT-SPI geometry. | Linux |
+| `BundleType` | Override the browser-engine detection used to filter noisy web content. | macOS |
+
+`accessibility.Supported()` reports whether this build has a backend for the
+running platform, and `accessibility.Mapper()` returns its role mapper.
+
+### Reading the tree
+
+```go
 if !client.CheckPermissions() {
 	return fmt.Errorf("accessibility permission is not granted")
 }
 
 window, err := client.FrontmostWindow(ctx)
-if err != nil {
-	return err
-}
 defer window.Release()
 
-nodes, err := client.ClickableNodes(ctx, window, nil, 0, false)
-if err != nil {
-	return err
-}
+// nil roles means the client's configured set; 0 depth means the default;
+// true reads text and state while scanning.
+nodes, err := client.ClickableNodes(ctx, window, nil, 0, true)
+defer accessibility.ReleaseNodes(nodes)
 
-elements := accessibility.FromNodes(nodes) // neutral element.Role, copied text
-for _, node := range nodes {
-	node.Release() // every node owns a platform reference
-}
-
-for _, elem := range elements {
-	fmt.Println(elem.Role(), elem.Bounds(), elem.IsClickable())
-}
+elements := accessibility.FromNodes(nodes) // neutral roles, copied text
 ```
 
-`ClickableNodes` takes native role names, because the platform backends filter
-before they read an element's text. Pass `nil` for the documented default
-targets, or resolve your own with the neutral vocabulary:
+| `ax.Client` method | Purpose |
+| --- | --- |
+| `FrontmostWindow`, `AllWindows`, `FrontmostAndPopoverWindows` | Window discovery. |
+| `FocusedApplication`, `ApplicationByBundleID` | Application discovery; `App.Info()` reports bundle metadata. |
+| `ClickableNodes(ctx, root, roles, maxDepth, readState)` | The main scan: clickable nodes under one root. |
+| `MenuBarClickableElements`, `MissionControlClickableNodes` | macOS surfaces. |
+| `ClickableElementsFromBundleID` | Scan an application that is not frontmost. |
+| `ActiveScreenBounds` | The active display, in logical pixels. |
+| `PerformAction`, `Scroll`, `MoveMouse`, `CursorPosition` | Input. `MoveMouse(p, bypassSmooth)` skips smooth motion. |
+| `CheckPermissions`, `SetClickableRoles`, `ClickableRoles`, `IsMissionControlActive`, `SupportsSupplementaryElements` | State. |
+| `Close` | Releases the backend. |
+
+`ax.Window` is an `ax.Element` with a `Role()`; `ax.App` adds
+`BundleIdentifier()` and `Info()`. `ax.Node` reports the platform's own role
+string, bounds, title, description, value, focus, identifier and clickability,
+and owns a platform reference that `Release()` frees.
+
+### Roles: neutral and native
+
+`element.Role` is the neutral vocabulary (`button`, `link`, `text_field`, …).
+A backend compares native strings (`AXButton`, `push button`, `Button`), so the
+facade translates before the walk starts:
 
 ```go
-roles := element.ResolveRoleEntries([]string{"button", "link", "ax:AXTextArea"}, "darwin")
-nodes, err := client.ClickableNodes(ctx, window, roles.Native, 0, false)
+client, err := accessibility.New(accessibility.Options{
+	Roles: []element.Role{element.RoleButton, element.RoleLink},
+})
+
+// A per-call list is also possible, and can mix neutral and native names:
+res := element.ResolveRoleEntries([]string{"button", "link", "ax:AXTextArea"}, "darwin")
+nodes, err := client.ClickableNodes(ctx, window, res.Native, 0, false)
 ```
 
-`element.ResolveRoleEntries` reports entries that are misspelled (fatal), that
-belong to another platform (ignored), or that have no equivalent here (ignored)
-instead of silently matching nothing. `ResolveRoles` is the shorter path when
-you already hold `element.Role` values.
+`ResolveRoleEntries` reports misspelled entries (fatal), entries from another
+platform (ignored), and entries with no equivalent here (ignored) instead of
+silently matching nothing. `ResolveRoles` is the shorter path when you already
+hold `element.Role` values. `element.DefaultClickableNativeRoles(vocab)` returns
+the shipped default set.
 
-On macOS, the auxiliary surfaces Neru scans are one call away:
+### Auxiliary surfaces (macOS)
 
 ```go
-for _, surface := range []accessibility.Surface{
-	accessibility.SurfaceDock,
-	accessibility.SurfaceNotificationCenter,
-	accessibility.SurfaceStageManager,
-	accessibility.SurfacePictureInPicture,
-	accessibility.SurfaceScreenCaptureUI,
+for _, surface := range []ax.Surface{
+	ax.SurfaceDock,
+	ax.SurfaceNotificationCenter,
+	ax.SurfaceStageManager,
+	ax.SurfacePictureInPicture,
+	ax.SurfaceScreenCaptureUI,
 } {
 	nodes, err := accessibility.SurfaceNodes(ctx, client, surface, nil, 0)
 	if err != nil {
 		continue // CodeNotSupported elsewhere, CodeElementNotFound if not running
 	}
-	// ... convert or use the nodes, then release them
+	// ... use the nodes, then release them
 }
 ```
 
 A platform without a surface reports `errs.CodeNotSupported`, so a
-cross-platform caller can loop over all of them unconditionally. Call
-`accessibility.WarmUp(ctx, client)` once at startup: on Linux it opens the
+cross-platform caller can loop over all of them unconditionally.
+
+### Warming up
+
+Call `accessibility.WarmUp(ctx, client)` once at startup. On Linux it opens the
 Wayland input session (which can show a consent dialog) and the uinput wheel
-ahead of the first hotkey.
+ahead of the first hotkey. Backends with nothing to prepare return nil.
 
-## Acting on what you found
+### Writing a backend
 
-```go
-import (
-	"image"
+Implement `ax.Client`. `Client` is one interface, so only the methods a platform
+can answer need real code; the rest report `errs.CodeNotSupported` rather than
+pretending. Optional capabilities are separate interfaces: `ax.SurfaceProvider`
+for the auxiliary surfaces, and `accessibility.Warmer` for input warm-up.
+`accessibility.SurfaceNodes` and `accessibility.WarmUp` type-assert to them, so
+the base contract stays small. `examples/custom-backend` is a complete minimal
+backend: a window, a node, and `CodeNotSupported` for everything else.
 
-	"github.com/LouYuanbo1/neru-core/action"
-)
+## Elements
 
-point := image.Pt(420, 240)
-err := client.PerformAction(action.TypeLeftClick, point, true, 0)
-```
-
-The action model covers left/right/middle click, press, release, toggle, moving
-the cursor, and scrolling, with `action.ModCmd`, `ModShift`, `ModAlt` and
-`ModCtrl` held during the action. `restoreCursor` puts the pointer back where it
-was after a click, which is what a hint activation wants.
-
-## Finding targets without an accessibility tree
-
-Vision is for the windows whose accessibility tree lies or is empty. Capture a
-region, run a detector, and get clickable elements back in global coordinates:
+`element.Element` is the neutral noun both halves produce. It is immutable, safe
+to share between goroutines, and carries no platform vocabulary.
 
 ```go
-import (
-	"github.com/LouYuanbo1/neru-core/vision"
-	"github.com/LouYuanbo1/neru-core/vision/capture"
-	"github.com/LouYuanbo1/neru-core/vision/contour"
+elem, err := element.NewElement(
+	"save-button",
+	image.Rect(120, 80, 220, 120),
+	element.RoleButton,
+	element.WithTitle("Save"),
+	element.WithClickable(true),
+	element.WithFocused(true),
+	element.WithSource(element.SourceAccessibilityTree),
 )
-
-shot, err := capture.CaptureScreen(ctx)
-if err != nil {
-	return err
-}
-
-frame := vision.Frame{
-	Img:    shot.Img,
-	Origin: shot.Origin,
-	Region: shot.Region,
-	Scale:  shot.Scale,
-}
-
-elements, err := vision.DetectContours(ctx, frame, contour.DefaultParams())
 ```
 
-`vision.DetectSegments` is the other detector: it groups words and controls
-rather than looking for button-shaped boxes. Both return `element.Element`s
-with `Element.IsVisionOnly()` set, so a caller knows it must act by
-coordinates. For an OCR engine, `vision.RegionsFromWords` maps recognized words
-from the capture's pixel space onto the desktop, and
-`vision.ElementsFromRegions` classifies them with the same geometry heuristics
-the detectors use.
+| Method | Returns |
+| --- | --- |
+| `ID`, `Role`, `Bounds`, `Center` | Identity and geometry. |
+| `Title`, `Description`, `Value`, `Text` | Text; `Text` prefers value, then title, then description. |
+| `SearchText` | Text of the node's subtree, for hint search. |
+| `IsClickable`, `IsFocused`, `Identifier` | State. |
+| `Source`, `IsVisionOnly` | What found it; vision-only elements must be clicked by coordinate. |
+| `Contains`, `Overlaps`, `IsVisible(screenBounds)` | Geometry predicates. |
 
-### Text recognition and the `vision` strategy
+Options: `WithClickable`, `WithTitle`, `WithDescription`, `WithValue`,
+`WithFocused`, `WithIdentifier`, `WithSearchText`, `WithSource`.
 
-The full "vision" strategy is OCR plus rectangle detection, merged and
-classified. The OCR engine is an opt-in import, so nothing pulls in a native
-library unless the program asks for one:
+### Role vocabulary
+
+`element.Role` values include: `button`, `link`, `text_field`, `static_text`,
+`image`, `check_box`, `radio_button`, `menu_item`, `menu_button`,
+`pop_up_button`, `tab_button`, `slider`, `switch`, `disclosure_triangle`,
+`text_area`, `combo_box`, `popover`, `sheet`, `menu`, `list`, `heading`,
+`menu_bar_item`, `menu_bar`, `cell`, `row`, `list_item`, `dock_item`,
+`incrementor`, `color_well`, `search_field`, `toolbar_button`, `toggle`, `table`,
+`outline`, `application`, `window`, `tab_group`, `group`, `scroll_area`,
+`split_group`, `generic_element`, `unknown`.
+
+### Mapping native roles
 
 ```go
-import (
-	"github.com/LouYuanbo1/neru-core/vision"
-	"github.com/LouYuanbo1/neru-core/vision/ocr/winrt"
-)
-
-recognizer, err := winrt.New() // or tesseract.NewLibrary / visionframework.New
-if err != nil {
-	return err
-}
-defer recognizer.Close()
-
-pipeline := vision.Pipeline{
-	Text:             recognizer,
-	DetectText:       true,
-	DetectRectangles: true, // pure-Go contour detector unless Boxes is set
-	WordLevel:        true,
-}
-
-elements, err := pipeline.Detect(ctx, frame)
+role, ok := element.MapNativeRole(element.AXRoleMapper{}, "AXButton", "")
+role, ok = element.MapNativeRole(element.UIARoleMapper{}, "Button", "")
+role, ok = element.MapNativeRole(element.ATSPIRoleMapper{}, "push button", "")
 ```
 
-`vision/ocr/winrt` (Windows.Media.Ocr), `vision/ocr/tesseract` (an in-process
-libtesseract via purego, or `NewCLI` for a local `tesseract` executable) and
-`vision/ocr/visionframework` (Apple's Vision framework) each implement
-`vision/ocr.Recognizer`. A caller can also supply its own engine or a
-`vision.BoxFinder` such as the Vision framework's rectangle request; the
-`Pipeline` only depends on those two interfaces.
+`element.MapperForGOOS(goos)` returns the mapper for a platform. The mappers are
+exported because `accessibility.FromNode` uses them, and a program with its own
+node type can translate without the facade.
+
+### Snapping between elements
+
+```go
+target, ok := element.Nearest(elements, image.Pt(500, 400), region)
+target, ok = element.Toward(elements, image.Pt(500, 400), region, element.DirectionRight)
+```
+
+Both clip candidates to the region and return `element.Target{Element, Point}`,
+where `Point` is the click point (the element's center, clipped). `Nearest`
+ranks by coverage and distance; `Toward` only considers one direction. Directions
+are `DirectionUp`, `DirectionDown`, `DirectionLeft`, `DirectionRight`, and
+`ParseDirection`/`String` convert to and from config strings.
+
+## Actions
+
+```go
+client.PerformAction(action.TypeLeftClick, image.Pt(420, 240), true, 0)
+client.PerformAction(action.TypeLeftMouseDown, point, false, action.ModShift|action.ModAlt)
+client.MoveMouse(point, false) // false means "do not bypass smooth motion"
+client.Scroll(0, 120, 0)       // deltaX, deltaY, modifiers
+```
+
+| Type | Meaning |
+| --- | --- |
+| `TypeLeftClick`, `TypeRightClick`, `TypeMiddleClick` | Press and release. |
+| `TypeLeftMouseDown` / `Up` / `Toggle`, same for right and middle | Hold, release, toggle. |
+| `TypeMoveMouse`, `TypeMoveMouseRelative` | Absolute and relative motion. |
+| `TypeScroll` | Wheel at the current position. |
+
+`MouseButton` is `ButtonLeft`, `ButtonRight`, `ButtonMiddle`; `MousePhase` is
+`PhaseClick`, `PhaseDown`, `PhaseUp`; `Type.MouseButtonPhase()` decomposes a
+type. `ParseType`, `ParsePhase` and `ParseModifiers` accept config spellings
+(`"left_click"`, `"down"`, `"cmd+shift"`).
+
+`Modifiers` is a bitmask of `ModCmd`, `ModShift`, `ModAlt`, `ModCtrl`.
+`PrimaryModifier()` is the platform accelerator (Command on macOS, Control
+elsewhere); `UsePrimaryModifier` changes what it means. `Scroll` takes the same
+mask; positive `deltaY` scrolls up and positive `deltaX` scrolls left on every
+platform.
+
+## Errors
+
+```go
+err := errs.New(errs.CodeNotSupported, "no OCR engine is available")
+err = errs.Wrapf(cause, errs.CodeTimeout, "reading %v", region)
+err = errs.New(errs.CodeAccessibilityDenied, "permission denied").
+	WithContext("remedy", "System Settings → Privacy & Security → Accessibility")
+```
+
+| Code | Meaning |
+| --- | --- |
+| `CodeNotSupported` | The facility is absent here; the message names the remedy. |
+| `CodeAccessibilityDenied` | A permission or consent was refused. |
+| `CodeAccessibilityFailed` | The platform API failed. |
+| `CodeElementNotFound` | The window, app or surface is not running. |
+| `CodeInvalidInput` | The caller passed something unusable (empty region, nil recognizer). |
+| `CodeContextCanceled` | The caller's context was canceled. |
+| `CodeTimeout` | A deadline expired. |
+| `CodeInternal` | An invariant broke; not actionable by the caller. |
+
+`errs.IsCode` and `errs.GetCode` look at the outermost error; `errors.Is` walks
+the chain and compares codes, so a wrapped error still matches its cause.
+`errs.IsNotSupported(err)` is the usual degradation check. `errs.Message`
+strips the code prefix for logging. A plain `error` that is not an `*errs.Error`
+reads as `CodeInternal`.
+
+## Vision
+
+### Frames and capture
+
+A capture is a `pixels.Frame`:
+
+| Field | Meaning |
+| --- | --- |
+| `Img` | The RGBA pixels, rectangle anchored at (0,0). |
+| `Origin` | Where the frame's top-left sits on the desktop, in logical pixels. |
+| `Region` | The logical desktop area the frame covers. |
+| `Scale` | Frame pixels per logical pixel (the monitor's DPI scale). |
+
+```go
+frame, err := capture.CaptureScreen(ctx)          // the active display
+frame, err = capture.CaptureRect(ctx, image.Rect(0, 0, 800, 600))
+```
+
+The same value goes straight into a detector, `ReadText` or a `Pipeline`; there
+is no conversion step.
+
+### Detectors
+
+```go
+buttons, err := vision.DetectContours(ctx, frame, contour.DefaultParams())
+words, err := vision.DetectSegments(ctx, frame, segment.TargetsWords)
+targets, err := vision.Detect(ctx, frame, vision.StrategyContour, "", contour.DefaultParams())
+```
+
+`contour.Params` tunes grayscale/blur/Sobel/Canny thresholds, target size
+bounds, container height, center slack and square-icon slack. The zero value
+filters everything out; start from `contour.DefaultParams()`. `segment` targets
+are `TargetsWords`, `TargetsPhrases` and `TargetsControls`.
+
+### The pipeline
+
+`Pipeline` is the `vision` strategy: OCR plus rectangle detection, merged and
+classified.
+
+| Field | Meaning |
+| --- | --- |
+| `Text` | The recognizer. Required when `DetectText` is set. |
+| `Boxes` | Optional native rectangle finder; nil means the pure-Go contour detector. |
+| `DetectText`, `DetectRectangles` | Which halves to run; at least one. |
+| `WordLevel` | One target per word instead of per line. |
+| `MinConfidence` | Drop observations below this score. |
+| `MergeIOU` | Non-maximum-suppression threshold; zero means `DefaultMergeIOU`. |
+| `Timeout` | Bound for one `Detect` call; zero means `DefaultVisionTimeout`. |
+| `Rectangle` | `RectangleOptions{MinSize, MinAspect, MaxAspect, MaxCandidates}`. |
+| `Params` | Contour thresholds when `Boxes` is nil. |
+| `Classifier` | Role assignment; nil means the baseline classifier. |
+
+`Pipeline.Health(ctx)` probes the recognizer without capturing. `Detect` returns
+elements with `SourceVision`; a call with neither half set is refused with
+`CodeInvalidInput`.
+
+### Reading text
+
+```go
+text, err := vision.ReadText(ctx, frame, recognizer, nil) // nil = engine defaults
+
+opts := &engine.Options{
+	Languages:     []string{"en-US", "ja"},
+	WordLevel:     true,
+	MinConfidence: 0.4,
+}
+text, err = vision.ReadText(ctx, frame, recognizer, opts)
+```
+
+`ReadText` joins the engine's words with single spaces and returns one string.
+It probes `Health` before reading pixels, so a missing engine fails before a
+screenshot is taken.
+
+### From words to elements
+
+```go
+regions := vision.RegionsFromWords(words, frame.Region, frame.Img.Rect, 0.4)
+elements, _ := vision.ElementsFromRegions(regions, vision.NewClassifier(vision.ClassifierOptions{}))
+```
+
+`RegionsFromWords` maps the engine's image-space boxes onto the desktop using the
+frame's region and image size. `MergeRegions` fuses overlaps, `SortRegionsByScore`
+orders them, and `ElementsFromRegions` assigns neutral roles. A `Classifier` is a
+first-pass geometry-and-text heuristic; `NewClassifier` accepts threshold
+overrides, and the zero value behaves like the shipped baseline.
+
+### Pixel helpers
+
+`pixels.Frame` also carries the operations the detectors share:
+`Crop(frame, region)` returns the part of a frame inside a logical rectangle
+(with its origin adjusted), `DeriveScale(imageWidth, logicalWidth)` recovers the
+DPI scale from a render, `Downsample(img, factor)` and
+`Resample(pix, stride, w, h, order, factor)` box-filter dense frames, and
+`Rows(height, work)` splits a frame across cores.
+
+## OCR
+
+### The facade
+
+```go
+recognizer, err := ocr.New()
+```
+
+`vision/ocr.New` returns the engine the operating system provides:
+Windows.Media.Ocr on Windows, Apple's Vision framework on macOS, libtesseract
+(or a `tesseract` executable) on Linux. It returns `engine.Recognizer`, so it
+substitutes for any explicit engine.
+
+### The contract
+
+```go
+type Recognizer interface {
+	Recognize(ctx context.Context, img *image.RGBA, opts Options) ([]Word, error)
+}
+
+type Word struct {
+	Text       string
+	Bounds     image.Rectangle
+	Confidence float64
+}
+
+type Options struct {
+	Languages     []string
+	WordLevel     bool
+	MinConfidence float64
+}
+```
+
+`Word.Bounds` is in the image's own pixel space, with (0,0) at its top-left.
+`engine.Health(ctx, r)` probes an optional `HealthChecker`; a recognizer without
+one is assumed available.
+
+### Engines
+
+| Package | Engine | Options |
+| --- | --- | --- |
+| `ocr/winrt` | Windows.Media.Ocr | `Options{Languages []string}` |
+| `ocr/tesseract` | libtesseract in process, or the CLI | `LibraryOptions{DataPath, Language, PageSegMode}` / `Options{Binary, PageSegMode, Languages}` |
+| `ocr/visionframework` | Apple's Vision framework | `Options{Languages []string, Accurate bool}` |
+
+```go
+r, err := winrt.New(winrt.Options{Languages: []string{"en-US"}})
+r, err = tesseract.NewLibrary(tesseract.LibraryOptions{Language: "eng"})
+r, err = tesseract.NewCLI(tesseract.Options{Binary: "tesseract"})
+r, err = visionframework.New(visionframework.Options{Accurate: true})
+```
+
+The winrt, visionframework and tesseract-library recognizers hold native
+resources and have `Close`; the tesseract CLI recognizer has nothing to release.
+A machine without the engine or its language pack reports `CodeNotSupported`
+from `New`, `Health` or `Recognize`, with the install step in the message.
+
+### A custom engine
+
+```go
+type fixed struct{}
+
+func (fixed) Recognize(_ context.Context, _ *image.RGBA, _ engine.Options) ([]engine.Word, error) {
+	return []engine.Word{
+		{Text: "Save", Bounds: image.Rect(10, 10, 60, 30), Confidence: 0.99},
+	}, nil
+}
+
+text, err := vision.ReadText(ctx, frame, fixed{}, nil)
+```
+
+Only `Recognize` is required. `vision` and `Pipeline` depend on this interface,
+never on an engine package, so importing `vision` does not link one.
+
+## Recipes
+
+### Click the element whose text says "Save"
+
+```go
+nodes, _ := client.ClickableNodes(ctx, window, nil, 0, true)
+defer accessibility.ReleaseNodes(nodes)
+
+for _, elem := range accessibility.FromNodes(nodes) {
+	if strings.Contains(elem.Text(), "Save") {
+		return client.PerformAction(action.TypeLeftClick, elem.Center(), true, 0)
+	}
+}
+```
+
+### Read the text in one region
+
+```go
+frame, err := capture.CaptureRect(ctx, image.Rect(0, 0, 800, 600))
+text, err := vision.ReadText(ctx, frame, recognizer, nil)
+```
+
+### Find targets when the tree is empty
+
+```go
+frame, err := capture.CaptureScreen(ctx)
+targets, err := vision.DetectSegments(ctx, frame, segment.TargetsControls)
+
+for _, el := range targets {
+	client.PerformAction(action.TypeLeftClick, el.Center(), true, 0)
+}
+```
+
+### Accessibility first, pixels as the fallback
+
+```go
+nodes, err := client.ClickableNodes(ctx, window, nil, 0, true)
+if err != nil || len(nodes) == 0 {
+	frame, _ := capture.CaptureScreen(ctx)
+	els, _ := vision.DetectContours(ctx, frame, contour.DefaultParams())
+	// ... click els by coordinate
+}
+```
+
+### Degrade deliberately
+
+```go
+if errs.IsNotSupported(err) {
+	// The facility is absent on this machine; fall back or skip the feature.
+}
+```
+
+Every platform gap reports `CodeNotSupported`; none pretends to succeed with an
+empty result.
+
+## Examples
+
+`go run ./examples/<name>` runs each one. The offline examples
+(`elements`, `errors`, `pixels`, `custom-engine`, `compositor`) need no desktop.
+
+| Example | Shows |
+| --- | --- |
+| `accessibility` | Client setup, frontmost window, clickable scan, node release. |
+| `hints` | A hints-mode scan that prints roles and geometry, not text. |
+| `roles` | Neutral/native role resolution, diagnostics, vocabulary tables. |
+| `elements` | Element model, options, `FromNode`, `Nearest`/`Toward`. |
+| `actions` | Clicks, moves, scrolls, drags and modifier masks. |
+| `errors` | Creating, wrapping, matching and inspecting errors. |
+| `capture` | Whole-screen and region capture; frame fields. |
+| `pixels` | `Frame`, `Crop`, `DeriveScale`, downsample/resample/rows. |
+| `vision` | Contour and segment detection over a real screen. |
+| `ocr` | The OCR facade, `ReadText` and the full `Pipeline`. |
+| `ocr-engines` | Explicit winrt / visionframework / tesseract selection per OS. |
+| `custom-engine` | Implementing `engine.Recognizer` without any native engine. |
+| `custom-backend` | Implementing `ax.Client`; the facade works against it unchanged. |
+| `compositor` | Wayland window-origin placement math. |
 
 ## Platform support
 
@@ -221,7 +619,7 @@ libtesseract via purego, or `NewCLI` for a local `tesseract` executable) and
 | Mission Control windows + Spaces bar | yes | — | — |
 | Mouse click / move / scroll | CGEvent | XTest (X11), libei (Wayland), uinput wheel | `SendInput` |
 | Smooth cursor motion | yes (`SmoothSteps`) | — | — |
-| Screen capture | `screencapture` | X11 root, wlr-screencopy (Wayland) | GDI `BitBlt` |
+| Screen capture | ScreenCaptureKit (macOS 14+), `screencapture` fallback | X11 root, wlr-screencopy (Wayland) | GDI `BitBlt` |
 | Text recognition | Vision framework | libtesseract / tesseract CLI | Windows.Media.Ocr |
 | Accessibility permission gate | `AXIsProcessTrusted` | none | none |
 
@@ -260,6 +658,13 @@ Known limits, stated by the backends themselves:
   overlay does not appear in the frame it detects over.
 
 ## Design notes
+
+**Layering.** Each vertical is facade → backends → contract. `accessibility`
+selects a backend; `accessibility/ax` is the contract those backends implement;
+`vision/ocr` selects an engine, `vision/ocr/engine` is the contract, and the
+engines sit beside it. The domain packages (`vision`, `element`) import the
+contract, never a backend, so importing them links no platform code and the
+facade stays the only place a platform is chosen.
 
 **No CGo.** Every native capability is reached at run time instead of linked:
 CoreFoundation, ApplicationServices, CoreGraphics and the Objective-C runtime on
@@ -303,7 +708,9 @@ GOOS=windows GOARCH=amd64 go build ./...
 ```
 
 Integration tests that drive a real desktop are tagged
-`integration && <os>` and are not part of `go test ./...`.
+`integration && <os>` and are not part of `go test ./...`. See
+[`docs/LIVE-VERIFICATION.md`](./docs/LIVE-VERIFICATION.md) for the per-platform
+checklist.
 
 ## License
 

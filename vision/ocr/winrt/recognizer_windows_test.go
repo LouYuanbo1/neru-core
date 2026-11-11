@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/LouYuanbo1/neru-core/errs"
-	"github.com/LouYuanbo1/neru-core/vision/ocr"
+	"github.com/LouYuanbo1/neru-core/vision/ocr/engine"
 )
 
 // TestRecognizer_Recognize_RefusesAnImageWithNoPixels pins that a frame the
@@ -30,7 +30,7 @@ func TestRecognizer_Recognize_RefusesAnImageWithNoPixels(t *testing.T) {
 			// is reached, or this test would touch the WinRT runtime.
 			recognizer := &Recognizer{}
 
-			words, err := recognizer.Recognize(context.Background(), testCase.img, ocr.Options{})
+			words, err := recognizer.Recognize(context.Background(), testCase.img, engine.Options{})
 			if !errs.IsCode(err, errs.CodeInvalidInput) {
 				t.Fatalf("error code = %s, want %s", errs.GetCode(err), errs.CodeInvalidInput)
 			}
@@ -51,7 +51,7 @@ func TestRecognizer_AfterClose_Refuses(t *testing.T) {
 	if _, err := recognizer.Recognize(
 		context.Background(),
 		image.NewRGBA(image.Rect(0, 0, 10, 10)),
-		ocr.Options{},
+		engine.Options{},
 	); !errs.IsCode(err, errs.CodeInvalidInput) {
 		t.Errorf("Recognize error code = %s, want %s", errs.GetCode(err), errs.CodeInvalidInput)
 	}
@@ -73,7 +73,7 @@ func TestRecognizer_NilHandle_IsHarmless(t *testing.T) {
 	if _, err := recognizer.Recognize(
 		context.Background(),
 		image.NewRGBA(image.Rect(0, 0, 10, 10)),
-		ocr.Options{},
+		engine.Options{},
 	); !errs.IsCode(err, errs.CodeInvalidInput) {
 		t.Errorf("Recognize error code = %s, want %s", errs.GetCode(err), errs.CodeInvalidInput)
 	}
@@ -102,8 +102,8 @@ func TestRecognizer_HealthIsTheOptionalContract(t *testing.T) {
 	recognizer := &Recognizer{}
 	recognizer.closed.Store(true)
 
-	var contract ocr.Recognizer = recognizer
-	if err := ocr.Health(context.Background(), contract); !errs.IsCode(err, errs.CodeInvalidInput) {
-		t.Errorf("ocr.Health error code = %s, want %s", errs.GetCode(err), errs.CodeInvalidInput)
+	var contract engine.Recognizer = recognizer
+	if err := engine.Health(context.Background(), contract); !errs.IsCode(err, errs.CodeInvalidInput) {
+		t.Errorf("Recognizer.Health error code = %s, want %s", errs.GetCode(err), errs.CodeInvalidInput)
 	}
 }

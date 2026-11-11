@@ -11,9 +11,9 @@
 //     parses its TSV output. It needs no shared library, only the binary, and is
 //     a useful fallback when the runtime is absent.
 //
-// Either way the module stays pure Go and gains no link-time dependency. This
-// is the Linux counterpart of Windows.Media.Ocr and Apple's Vision framework,
-// and it is usable on any platform where tesseract exists.
+// Either way the module stays pure Go and gains no link-time dependency. It is
+// the default engine on Linux and the fallback on macOS, and it works on any
+// platform where tesseract is installed.
 //
 // Text is screen content: the frame and the recognized strings reach the
 // caller and nothing else. The temporary PNG the CLI path writes is removed
@@ -33,7 +33,7 @@ import (
 	"sync"
 
 	"github.com/LouYuanbo1/neru-core/errs"
-	"github.com/LouYuanbo1/neru-core/vision/ocr"
+	"github.com/LouYuanbo1/neru-core/vision/ocr/engine"
 )
 
 // DefaultPageSegMode is tesseract's sparse-text mode, the one that behaves best
@@ -49,12 +49,12 @@ type Options struct {
 	Binary string
 	// PageSegMode is passed as --psm. Zero means DefaultPageSegMode.
 	PageSegMode int
-	// Languages overrides ocr.Options.Languages when set. Entries are joined
+	// Languages overrides engine.Options.Languages when set. Entries are joined
 	// with "+", tesseract's own syntax ("eng+chi_sim").
 	Languages []string
 }
 
-// Recognizer is a tesseract-backed ocr.Recognizer.
+// Recognizer is a tesseract-backed engine.Recognizer.
 //
 // It is safe for concurrent use: invocations are serialized, because spawning
 // one tesseract per call is cheap and a shared process would not be.
@@ -133,8 +133,8 @@ func (r *Recognizer) locate() (string, error) {
 func (r *Recognizer) Recognize(
 	ctx context.Context,
 	img *image.RGBA,
-	opts ocr.Options,
-) ([]ocr.Word, error) {
+	opts engine.Options,
+) ([]engine.Word, error) {
 	if img == nil || img.Rect.Dx() <= 0 || img.Rect.Dy() <= 0 {
 		return nil, errs.New(errs.CodeInvalidInput, "tesseract needs a non-empty frame")
 	}
@@ -220,7 +220,7 @@ func (r *Recognizer) pageMode() int {
 
 // languageOption returns the -l value for this call: the per-call languages
 // win over the recognizer's configured ones, tesseract's syntax included.
-func (r *Recognizer) languageOption(opts ocr.Options) string {
+func (r *Recognizer) languageOption(opts engine.Options) string {
 	languages := opts.Languages
 	if len(languages) == 0 {
 		languages = r.languages
@@ -270,14 +270,14 @@ func writeTempPNG(img *image.RGBA) (string, error) {
 // The format is one record per row with eleven tab-separated fields:
 // level, page, block, par, line, word, left, top, width, height, conf, text.
 // Level 5 rows are words; level 4 rows are lines. Coordinates are image
-// pixels, which is the space ocr.Word documents. Rows whose text is empty or
+// pixels, which is the space engine.Word documents. Rows whose text is empty or
 // whose confidence is negative are skipped.
 //
 // With wordLevel false, words are grouped by their line and joined with
 // spaces; the line's box is the union of its words and its confidence the
 // lowest word confidence, which is the honest summary of "some part of this
 // line was uncertain".
-func ParseTSV(data []byte, wordLevel bool) ([]ocr.Word, error) {
+func ParseTSV(data []byte, wordLevel bool) ([]engine.Word, error) {
 	reader := csv.NewReader(bytes.NewReader(data))
 	reader.Comma = '\t'
 	reader.FieldsPerRecord = -1
@@ -288,7 +288,7 @@ func ParseTSV(data []byte, wordLevel bool) ([]ocr.Word, error) {
 		return nil, errs.Wrap(err, errs.CodeInternal, "could not parse tesseract output")
 	}
 
-	var words []ocr.Word
+	var words []engine.Word
 
 	type lineKey struct{ page, block, par, line int }
 
@@ -334,7 +334,7 @@ func ParseTSV(data []byte, wordLevel bool) ([]ocr.Word, error) {
 		normalized := confidence / 100
 
 		if wordLevel {
-			words = append(words, ocr.Word{Text: text, Bounds: bounds, Confidence: normalized})
+			words = append(words, engine.Word{Text: text, Bounds: bounds, Confidence: normalized})
 
 			continue
 		}
@@ -368,7 +368,7 @@ func ParseTSV(data []byte, wordLevel bool) ([]ocr.Word, error) {
 	for _, key := range order {
 		accumulator := lines[key]
 
-		words = append(words, ocr.Word{
+		words = append(words, engine.Word{
 			Text:       strings.Join(accumulator.text, " "),
 			Bounds:     accumulator.bounds,
 			Confidence: accumulator.minConf,
@@ -378,4 +378,4 @@ func ParseTSV(data []byte, wordLevel bool) ([]ocr.Word, error) {
 	return words, nil
 }
 
-var _ ocr.Recognizer = (*Recognizer)(nil)
+var _ engine.Recognizer = (*Recognizer)(nil)

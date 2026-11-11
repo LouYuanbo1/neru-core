@@ -1,8 +1,9 @@
 // Package vision ties a captured frame to a list of uncertain elements by
 // running the pure-Go contour or segment detector over it and turning the
 // boxes they find into vision-only elements. It is the recognizer half of the
-// library: platform backends capture pixels and feed them here as *image.RGBA,
-// and get back element.Elements they can hand to the ax layer for clicking.
+// library: a capture backend produces a pixels.Frame, this package reads it,
+// and the caller gets back element.Elements it can hand to the ax layer for
+// clicking.
 //
 // The classifier lives here too. It is a first-pass, geometry-and-text
 // heuristic that assigns a role to a detected region. It answers in the
@@ -19,6 +20,7 @@ import (
 	"github.com/LouYuanbo1/neru-core/element"
 	"github.com/LouYuanbo1/neru-core/errs"
 	"github.com/LouYuanbo1/neru-core/vision/contour"
+	"github.com/LouYuanbo1/neru-core/vision/pixels"
 	"github.com/LouYuanbo1/neru-core/vision/segment"
 )
 
@@ -37,26 +39,10 @@ const (
 	StrategySegment Strategy = "segment"
 )
 
-// Frame is one capture handed to a pixel detector: the pixels, where its
-// top-left corner sits on the global desktop, the region in global
-// coordinates the caller asked for, and how many frame pixels make one
-// logical pixel. The frame may be wider than the region (a capture backend
-// may win back a whole display) but never narrower.
-type Frame struct {
-	// Img is the captured pixels, in RGBA.
-	Img *image.RGBA
-	// Origin is where the frame's top-left corner sits on the desktop.
-	Origin image.Point
-	// Region is the part of the frame, in global coordinates, to detect in.
-	Region image.Rectangle
-	// Scale is frame pixels per logical pixel.
-	Scale float64
-}
-
 // checkRegion honors a canceled context and refuses an empty region, the
 // shared preamble of every detector. It marks the frame's region canonical so
 // the detector clips against it consistently.
-func (f *Frame) checkRegion(ctx context.Context, detector Strategy) error {
+func checkRegion(ctx context.Context, f *pixels.Frame, detector Strategy) error {
 	select {
 	case <-ctx.Done():
 		return errs.Wrap(
@@ -85,11 +71,10 @@ func (f *Frame) checkRegion(ctx context.Context, detector Strategy) error {
 // coordinates.
 func DetectContours(
 	ctx context.Context,
-	frame Frame,
+	f pixels.Frame,
 	params contour.Params,
 ) ([]*element.Element, error) {
-	f := frame
-	if err := f.checkRegion(ctx, StrategyContour); err != nil {
+	if err := checkRegion(ctx, &f, StrategyContour); err != nil {
 		return nil, err
 	}
 
@@ -106,11 +91,10 @@ func DetectContours(
 // button elements in global coordinates.
 func DetectSegments(
 	ctx context.Context,
-	frame Frame,
+	f pixels.Frame,
 	targets string,
 ) ([]*element.Element, error) {
-	f := frame
-	if err := f.checkRegion(ctx, StrategySegment); err != nil {
+	if err := checkRegion(ctx, &f, StrategySegment); err != nil {
 		return nil, err
 	}
 
@@ -127,16 +111,16 @@ func DetectSegments(
 // detectSegments for the two strategies' shape biases.
 func Detect(
 	ctx context.Context,
-	frame Frame,
+	f pixels.Frame,
 	strategy Strategy,
 	targets string,
 	params contour.Params,
 ) ([]*element.Element, error) {
 	switch strategy {
 	case StrategyContour:
-		return DetectContours(ctx, frame, params)
+		return DetectContours(ctx, f, params)
 	case StrategySegment:
-		return DetectSegments(ctx, frame, targets)
+		return DetectSegments(ctx, f, targets)
 	default:
 		return nil, errs.Newf(
 			errs.CodeInvalidInput,
@@ -151,7 +135,7 @@ func Detect(
 // than the region asked for yields nothing outside it, and a target straddling
 // the edge cannot put its hint, and its click, outside.
 func targetElements(
-	f Frame,
+	f pixels.Frame,
 	rects []image.Rectangle,
 	strategy Strategy,
 ) []*element.Element {

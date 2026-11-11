@@ -6,7 +6,7 @@ import (
 
 	"github.com/LouYuanbo1/neru-core/element"
 	"github.com/LouYuanbo1/neru-core/vision"
-	"github.com/LouYuanbo1/neru-core/vision/ocr"
+	"github.com/LouYuanbo1/neru-core/vision/ocr/engine"
 )
 
 func TestRegionsFromWords_MapsFramePixelsOntoTheDesktop(t *testing.T) {
@@ -14,7 +14,7 @@ func TestRegionsFromWords_MapsFramePixelsOntoTheDesktop(t *testing.T) {
 
 	region := image.Rect(100, 200, 300, 400)  // what the caller asked for
 	imageBounds := image.Rect(0, 0, 400, 400) // a 2x capture of it
-	words := []ocr.Word{
+	words := []engine.Word{
 		{Text: "Save", Bounds: image.Rect(20, 40, 60, 60), Confidence: 0.9},
 		{Text: "  ", Bounds: image.Rect(0, 0, 10, 10), Confidence: 0.9},
 		{Text: "Cancel", Bounds: image.Rect(200, 100, 260, 120), Confidence: 0.2},
@@ -39,7 +39,7 @@ func TestRegionsFromWords_MapsFramePixelsOntoTheDesktop(t *testing.T) {
 func TestRegionsFromWords_NoGeometryFindsNothing(t *testing.T) {
 	t.Parallel()
 
-	words := []ocr.Word{{Text: "Save", Confidence: 1}}
+	words := []engine.Word{{Text: "Save", Confidence: 1}}
 
 	if got := vision.RegionsFromWords(words, image.Rectangle{}, image.Rect(0, 0, 10, 10), 0); got != nil {
 		t.Errorf("RegionsFromWords(empty region) = %v, want nil", got)

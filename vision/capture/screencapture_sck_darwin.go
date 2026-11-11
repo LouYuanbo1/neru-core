@@ -14,6 +14,7 @@ import (
 
 	"github.com/LouYuanbo1/neru-core/errs"
 	"github.com/LouYuanbo1/neru-core/internal/native"
+	"github.com/LouYuanbo1/neru-core/vision/pixels"
 	"github.com/ebitengine/purego"
 )
 
@@ -534,9 +535,9 @@ func (t sckTarget) pixelSize() (int, int) {
 // captureWithScreenCaptureKit returns one screen/region shot with this
 // process's windows excluded. Any failure returns an error; the caller then
 // falls back to screencapture.
-func captureWithScreenCaptureKit(ctx context.Context, region image.Rectangle) (Shot, error) {
+func captureWithScreenCaptureKit(ctx context.Context, region image.Rectangle) (pixels.Frame, error) {
 	if err := ctx.Err(); err != nil {
-		return Shot{}, errs.Wrap(err, errs.CodeContextCanceled, "capture canceled")
+		return pixels.Frame{}, errs.Wrap(err, errs.CodeContextCanceled, "capture canceled")
 	}
 
 	deadline := time.Now().Add(sckDefaultTimeout)
@@ -545,30 +546,30 @@ func captureWithScreenCaptureKit(ctx context.Context, region image.Rectangle) (S
 	}
 
 	if time.Until(deadline) <= 0 {
-		return Shot{}, errs.New(errs.CodeTimeout, "the capture deadline has already passed")
+		return pixels.Frame{}, errs.New(errs.CodeTimeout, "the capture deadline has already passed")
 	}
 
 	api, err := loadSCK()
 	if err != nil {
-		return Shot{}, err
+		return pixels.Frame{}, err
 	}
 
 	target, err := api.target(region)
 	if err != nil {
-		return Shot{}, err
+		return pixels.Frame{}, err
 	}
 
 	// Only one completion handler may be outstanding at a time: the block
 	// literals carry no identity, so two captures in flight together would
 	// deliver into each other's results.
 	if err := sckEnterCapture(ctx, deadline); err != nil {
-		return Shot{}, err
+		return pixels.Frame{}, err
 	}
 	defer sckLeaveCapture()
 
 	img, err := api.capture(ctx, target, deadline)
 	if err != nil {
-		return Shot{}, err
+		return pixels.Frame{}, err
 	}
 
 	scale := float64(img.Rect.Dx()) / float64(target.region.Dx())
@@ -576,7 +577,7 @@ func captureWithScreenCaptureKit(ctx context.Context, region image.Rectangle) (S
 		scale = target.display.scale()
 	}
 
-	return Shot{
+	return pixels.Frame{
 		Img:    img,
 		Origin: target.region.Min,
 		Scale:  scale,
@@ -749,7 +750,7 @@ func ownWindowIndexes(pids []int32, self int32) []int {
 
 // cropRGBA drops pixels outside a width×height rectangle anchored at the
 // image's top-left corner. ScreenCaptureKit can round an output size to what
-// the display stream can give, and the Shot's Region is the region asked for,
+// the display stream can give, and the frame's Region is the region asked for,
 // so a slightly larger image is trimmed rather than folded into the scale. An
 // image smaller than asked for, or one already the right size, is returned as
 // it is.

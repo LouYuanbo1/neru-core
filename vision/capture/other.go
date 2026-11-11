@@ -7,6 +7,7 @@ import (
 	"image"
 
 	"github.com/LouYuanbo1/neru-core/errs"
+	"github.com/LouYuanbo1/neru-core/vision/pixels"
 )
 
 // unsupported answers every non-implementing platform: the capture contract
@@ -18,12 +19,12 @@ func unsupported(what string) error {
 
 // captureScreen is the non-implementing answer on this platform: refusing with
 // CodeNotSupported is more honest than reading an empty screen.
-func captureScreen(context.Context) (Shot, error) {
-	return Shot{}, unsupported("screen capture")
+func captureScreen(context.Context) (pixels.Frame, error) {
+	return pixels.Frame{}, unsupported("screen capture")
 }
 
 // captureRect has the same contract as captureScreen: this platform cannot
 // read the screen, so a region capture is refused too.
-func captureRect(context.Context, image.Rectangle) (Shot, error) {
-	return Shot{}, unsupported("region capture")
+func captureRect(context.Context, image.Rectangle) (pixels.Frame, error) {
+	return pixels.Frame{}, unsupported("region capture")
 }

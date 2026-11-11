@@ -95,11 +95,11 @@
 | `accessibility/{darwin,linux,windows}` | 单平台的原生绑定 |
 | `accessibility/linux/compositor` | D-Bus/CLI 合成器桥接（仅 Linux） |
 | `element`、`action`、`errs` | 纯 Go，无原生绑定 |
-| `vision`、`vision/contour`、`vision/segment`、`vision/frame` | 纯 Go 检测器与管道 |
+| `vision`、`vision/contour`、`vision/segment`、`vision/pixels` | 纯 Go 检测器与管道 |
 | `vision/capture` | 平台捕获；`vision/capture/wayland` 仅限 Linux |
-| `vision/ocr` | 仅契约 |
+| `vision/ocr` | 平台选择器；拉入该平台的引擎 |
+| `vision/ocr/engine` | 仅契约 |
 | `vision/ocr/{winrt,tesseract,visionframework}` | 各一个识别器引擎 |
-| `vision/ocr/auto` | 在运行时选择平台的引擎 |
 | `internal/*` | 实现细节，模块外不可导入 |
 
 ## 验证命令

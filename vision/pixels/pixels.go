@@ -1,10 +1,4 @@
-// Package frame holds the pixel plumbing the pure-Go detectors and the capture
-// backends share: splitting a frame's rows across cores and box-filtering a
-// high-density frame down to logical pixels.
-//
-// A frame is screen content. Nothing here logs, copies past the call, or
-// retains the pixels.
-package frame
+package pixels
 
 import (
 	"image"

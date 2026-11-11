@@ -1,10 +1,12 @@
-// Package winrt recognizes text through Windows.Media.Ocr, the first-party
-// WinRT engine every Windows 10 and 11 desktop ships.
+// Package winrt recognizes text through Windows.Media.Ocr, the first-party OCR
+// engine Windows 10 and 11 expose through the Windows Runtime (WinRT), the
+// COM-based API surface Windows has shipped since Windows 8.
 //
-// It is one implementation of the ocr.Recognizer contract, and the Windows half
-// of that contract's backend set. A caller imports it instead of the interface
-// only when it wants the engine Windows already has, without a tesseract
-// installation beside it.
+// The package is named for that API, not for the operating system: what it
+// provides is one engine, and that engine happens to exist only on Windows. It
+// is the Windows implementation of the engine.Recognizer contract, so a program
+// that wants "the engine Windows already has, without a tesseract installation
+// beside it" imports this package instead of vision/ocr.
 //
 // # The engine
 //

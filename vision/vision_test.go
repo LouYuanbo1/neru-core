@@ -7,12 +7,13 @@ import (
 
 	"github.com/LouYuanbo1/neru-core/element"
 	"github.com/LouYuanbo1/neru-core/vision/contour"
+	"github.com/LouYuanbo1/neru-core/vision/pixels"
 )
 
 func TestTargetElements_ClipsToRegionAndDropsOutside(t *testing.T) {
 	t.Parallel()
 
-	f := Frame{
+	f := pixels.Frame{
 		Origin: image.Pt(1920, 0),
 		Region: image.Rect(2000, 100, 2800, 700),
 	}
@@ -49,7 +50,7 @@ func TestTargetElements_ClipsToRegionAndDropsOutside(t *testing.T) {
 func TestDetect_RejectsEmptyRegionAndCancellation(t *testing.T) {
 	t.Parallel()
 
-	f := Frame{Region: image.Rectangle{}}
+	f := pixels.Frame{Region: image.Rectangle{}}
 	if _, err := Detect(context.Background(), f, StrategyContour, "", contour.Params{}); err == nil {
 		t.Error("Detect(empty region) should error")
 	}
@@ -57,7 +58,7 @@ func TestDetect_RejectsEmptyRegionAndCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	f = Frame{Region: image.Rect(0, 0, 100, 100)}
+	f = pixels.Frame{Region: image.Rect(0, 0, 100, 100)}
 	if _, err := Detect(ctx, f, StrategyContour, "", contour.Params{}); err == nil {
 		t.Error("Detect(canceled) should error")
 	}

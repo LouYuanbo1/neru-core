@@ -22,7 +22,8 @@
 //	if err != nil {
 //		return err
 //	}
-//	elements, _ := accessibility.FromNodes(nodes)
+//	elements := accessibility.FromNodes(nodes)
+//	accessibility.ReleaseNodes(nodes)
 //
 // Every node owns an underlying platform reference; convert it or release it
 // before dropping it.
@@ -41,9 +42,19 @@ import (
 // Options configures the platform backend. Zero values mean the backend's
 // documented defaults.
 type Options struct {
+	// Roles are the neutral roles to scan for ("button", "link",
+	// "text field"). They are translated to this platform's native role names
+	// before the backend starts, so one configuration reads the same on every
+	// platform. A role the running platform cannot express is refused rather
+	// than silently scanning nothing.
+	//
+	// Empty means the platform's default clickable set. ClickableRoles, when
+	// set as well, is appended verbatim.
+	Roles []element.Role
 	// ClickableRoles are native role names for the running platform
 	// ("AXButton" on macOS, "push button" on Linux, "Button" on Windows).
-	// Empty means element.DefaultClickableNativeRoles for this platform.
+	// Empty means element.DefaultClickableNativeRoles for this platform, unless
+	// Roles is set.
 	ClickableRoles []string
 	// MaxDepth bounds the tree walk below the root. Zero or negative means
 	// the backend's default.
@@ -73,6 +84,54 @@ type Options struct {
 	// "webkit"). Empty detects it from the root application. Honored on macOS
 	// only.
 	BundleType string
+}
+
+// clickableRoles returns the native role names the backend scans for: the
+// neutral Roles translated for this platform, followed by any native
+// ClickableRoles the caller spelled itself. It returns nil when the caller named
+// no roles at all, which asks the backend for its default set.
+func (o Options) clickableRoles() ([]string, error) {
+	if len(o.Roles) == 0 && len(o.ClickableRoles) == 0 {
+		return nil, nil
+	}
+
+	resolved := make([]string, 0, len(o.Roles)+len(o.ClickableRoles))
+
+	if len(o.Roles) > 0 {
+		vocabulary, ok := element.CurrentVocabulary()
+		if !ok {
+			return nil, errs.New(
+				errs.CodeNotSupported,
+				"this platform has no accessibility backend to resolve neutral roles for",
+			)
+		}
+
+		for _, role := range o.Roles {
+			if _, known := element.LookupRole(role); !known {
+				return nil, errs.Newf(
+					errs.CodeInvalidInput,
+					"unknown accessibility role %q",
+					role,
+				)
+			}
+		}
+
+		neutral := element.ResolveRoles(o.Roles, vocabulary).Native
+		if len(neutral) == 0 {
+			return nil, errs.Newf(
+				errs.CodeNotSupported,
+				"none of the roles %v has a %s equivalent",
+				o.Roles,
+				vocabulary,
+			)
+		}
+
+		resolved = append(resolved, neutral...)
+	}
+
+	resolved = append(resolved, o.ClickableRoles...)
+
+	return resolved, nil
 }
 
 // Supported reports whether this build has an accessibility backend for the
@@ -168,20 +227,9 @@ func ReleaseNodes(nodes []ax.Node) {
 	}
 }
 
-// SurfaceNames an auxiliary clickable surface, re-exported from the contract so
-// a caller does not need to import ax for it.
-type Surface = ax.Surface
-
-// The auxiliary surfaces a backend can be asked for.
-const (
-	SurfaceDock               = ax.SurfaceDock
-	SurfaceNotificationCenter = ax.SurfaceNotificationCenter
-	SurfaceStageManager       = ax.SurfaceStageManager
-	SurfacePictureInPicture   = ax.SurfacePictureInPicture
-	SurfaceScreenCaptureUI    = ax.SurfaceScreenCaptureUI
-)
-
-// SurfaceNodes asks the backend for one auxiliary surface's clickable nodes.
+// SurfaceNodes asks the backend for one auxiliary surface's clickable nodes,
+// named with the ax contract's surface constants (ax.SurfaceDock,
+// ax.SurfaceNotificationCenter, ...).
 //
 // It is a free function rather than a Client method because only some
 // platforms have these surfaces, and the ax.Client contract stays the same on
@@ -191,7 +239,7 @@ const (
 func SurfaceNodes(
 	ctx context.Context,
 	client ax.Client,
-	surface Surface,
+	surface ax.Surface,
 	roles []string,
 	maxDepth int,
 ) ([]ax.Node, error) {

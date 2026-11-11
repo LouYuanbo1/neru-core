@@ -8,7 +8,7 @@ import (
 	"testing"
 	"unicode/utf16"
 
-	"github.com/LouYuanbo1/neru-core/vision/ocr"
+	"github.com/LouYuanbo1/neru-core/vision/ocr/engine"
 )
 
 func TestPixelRect_MapsVisionRectanglesOntoImagePixels(t *testing.T) {
@@ -220,7 +220,7 @@ func TestWordSpans_SplitsOnWhitespaceWithUTF16Ranges(t *testing.T) {
 }
 
 func TestSortReadingOrder_ReadsLinesTopToBottomThenLeftToRight(t *testing.T) {
-	words := []ocr.Word{
+	words := []engine.Word{
 		{Text: "second", Bounds: image.Rect(60, 10, 120, 30)},
 		{Text: "below", Bounds: image.Rect(0, 40, 50, 60)},
 		{Text: "first", Bounds: image.Rect(0, 12, 50, 28)},
@@ -240,7 +240,7 @@ func TestSortReadingOrder_ReadsLinesTopToBottomThenLeftToRight(t *testing.T) {
 func TestSortReadingOrder_KeepsAFlushLineOrderWithinItsTolerance(t *testing.T) {
 	// The two boxes' centers are four pixels apart, inside half the shorter
 	// box's height, so Vision-style words of one line stay together.
-	words := []ocr.Word{
+	words := []engine.Word{
 		{Text: "wide", Bounds: image.Rect(50, 4, 90, 24)},
 		{Text: "narrow", Bounds: image.Rect(0, 5, 40, 15)},
 		{Text: "next", Bounds: image.Rect(0, 20, 40, 30)},
@@ -257,7 +257,7 @@ func TestSortReadingOrder_KeepsAFlushLineOrderWithinItsTolerance(t *testing.T) {
 }
 
 func TestSortReadingOrder_LeavesShortListsAlone(t *testing.T) {
-	var nothing []ocr.Word
+	var nothing []engine.Word
 
 	sortReadingOrder(nothing)
 
@@ -265,7 +265,7 @@ func TestSortReadingOrder_LeavesShortListsAlone(t *testing.T) {
 		t.Fatalf("sortReadingOrder(nil) = %v, want nil", nothing)
 	}
 
-	one := []ocr.Word{{Text: "only", Bounds: image.Rect(10, 10, 40, 20)}}
+	one := []engine.Word{{Text: "only", Bounds: image.Rect(10, 10, 40, 20)}}
 
 	sortReadingOrder(one)
 
@@ -275,7 +275,7 @@ func TestSortReadingOrder_LeavesShortListsAlone(t *testing.T) {
 }
 
 // textOf lists the words in order, so a failure message shows what came back.
-func textOf(words []ocr.Word) []string {
+func textOf(words []engine.Word) []string {
 	texts := make([]string, len(words))
 	for index, word := range words {
 		texts[index] = word.Text

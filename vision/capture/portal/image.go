@@ -77,13 +77,3 @@ func toRGBA(decoded image.Image) *image.RGBA {
 
 	return img
 }
-
-// cropImage copies pixels out of src into a new image anchored at (0,0), so a
-// cropped frame does not keep the whole screenshot alive and its rectangle
-// starts where a caller expects it to.
-func cropImage(src *image.RGBA, pixels image.Rectangle) *image.RGBA {
-	dst := image.NewRGBA(image.Rect(0, 0, pixels.Dx(), pixels.Dy()))
-	draw.Draw(dst, dst.Rect, src, pixels.Min, draw.Src)
-
-	return dst
-}

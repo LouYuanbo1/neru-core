@@ -1,11 +1,17 @@
-// Package ocr defines the text-recognition contract the vision pipeline reads
-// screen text through.
+// Package engine defines the contract an OCR engine implements: the Recognizer
+// interface the vision pipeline reads screen text through, the Word it returns,
+// and the Options one call takes.
 //
-// A recognizer is a separate, optional import so a caller pays only for the
-// engine it uses: vision/ocr/winrt for Windows.Media.Ocr, vision/ocr/tesseract
-// for a local tesseract installation, vision/ocr/visionframework for Apple's
-// Vision framework. The vision package depends on this interface, never on an
-// engine.
+// The engines themselves are the packages beside this one — vision/ocr/winrt for
+// Windows.Media.Ocr, vision/ocr/tesseract for a local tesseract installation,
+// vision/ocr/visionframework for Apple's Vision framework — and vision/ocr is the
+// facade that picks the one the running system provides, the way
+// accessibility.New picks an accessibility backend.
+//
+// The package is named engine rather than api or spec because it answers "what
+// is an OCR engine": every type in it exists to describe one. Code that imports
+// it and also keeps a handle in a variable should name that handle for what it
+// is (comEngine, api, ...) rather than engine, which the import owns.
 //
 // A recognizer answers in the captured image's own pixel space: Bounds are
 // pixels of the image passed to Recognize, with (0,0) at its top-left corner,
@@ -14,7 +20,7 @@
 //
 // Text is screen content. A recognizer must not log it, count it, or write it
 // anywhere; the only destination is the caller.
-package ocr
+package engine
 
 import (
 	"context"

@@ -41,9 +41,9 @@
 // No pixel, path or file content is logged, and no frame outlives the call that
 // asked for it.
 //
-// This package deliberately does not import vision/capture. The wiring in
-// vision/capture/linux_dispatch.go converts a Frame into that package's Shot,
-// and importing back would be a cycle.
+// This package deliberately does not import vision/capture: the capture
+// facade imports this package to select it, so importing back would be a
+// cycle. What both sides exchange is pixels.Frame, the type both depend on.
 package portal
 
 import (
@@ -52,6 +52,7 @@ import (
 	"time"
 
 	"github.com/LouYuanbo1/neru-core/errs"
+	"github.com/LouYuanbo1/neru-core/vision/pixels"
 )
 
 // requestBudget bounds everything one capture waits for: the session bus, the
@@ -90,16 +91,16 @@ func Available() bool {
 }
 
 // CaptureScreen asks the portal for a screenshot of the whole desktop and
-// returns it as a Frame whose Region is the desktop's logical bounds.
+// returns it as a pixels.Frame whose Region is the desktop's logical bounds.
 //
 // The portal may show a permission prompt on first use; that is the documented
 // price of this path. A refusal or cancellation reports
 // errs.CodeAccessibilityDenied, a portal that never answers reports
 // errs.CodeTimeout, and a session with no portal reports errs.CodeNotSupported
 // naming the portal so a caller can fall back.
-func CaptureScreen(ctx context.Context) (Frame, error) {
+func CaptureScreen(ctx context.Context) (pixels.Frame, error) {
 	if err := checkContext(ctx); err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 
 	return grab(ctx)
@@ -108,7 +109,7 @@ func CaptureScreen(ctx context.Context) (Frame, error) {
 // CaptureRect captures the screen and crops it to region, in logical desktop
 // coordinates.
 //
-// Region in the returned Frame is region intersected with the desktop the
+// Region in the returned pixels.Frame is region intersected with the desktop the
 // portal's pixels cover, and Origin is that intersection's top-left, so a
 // region that is partly off the desktop yields the part that exists and says
 // so. Scale is the frame's own, so a 2x desktop returns twice as many pixels as
@@ -118,14 +119,14 @@ func CaptureScreen(ctx context.Context) (Frame, error) {
 // the whole screen, as the wlroots backend refuses it, because vision bounds
 // its results by the region and an empty one would silently read as "the whole
 // screen". A region entirely outside the desktop is refused the same way.
-func CaptureRect(ctx context.Context, region image.Rectangle) (Frame, error) {
+func CaptureRect(ctx context.Context, region image.Rectangle) (pixels.Frame, error) {
 	if err := checkContext(ctx); err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 
 	region = region.Canon()
 	if region.Empty() {
-		return Frame{}, errs.Newf(
+		return pixels.Frame{}, errs.Newf(
 			errs.CodeInvalidInput,
 			"region capture needs a region to capture; %v is empty",
 			region,
@@ -134,10 +135,10 @@ func CaptureRect(ctx context.Context, region image.Rectangle) (Frame, error) {
 
 	frame, err := grab(ctx)
 	if err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 
-	return crop(frame, region)
+	return pixels.Crop(frame, region)
 }
 
 // withBudget applies requestBudget when the caller set no deadline, so a portal

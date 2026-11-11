@@ -3,7 +3,7 @@ package segment
 import (
 	"image"
 
-	pixels "github.com/LouYuanbo1/neru-core/vision/frame"
+	"github.com/LouYuanbo1/neru-core/vision/pixels"
 )
 
 // Texture. A frosted panel over a photo, a dithered fill or a grainy

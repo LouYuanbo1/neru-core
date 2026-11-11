@@ -1,12 +1,12 @@
 //go:build darwin
 
-package auto
+package ocr
 
 import (
 	"context"
 
 	"github.com/LouYuanbo1/neru-core/errs"
-	"github.com/LouYuanbo1/neru-core/vision/ocr"
+	"github.com/LouYuanbo1/neru-core/vision/ocr/engine"
 	"github.com/LouYuanbo1/neru-core/vision/ocr/tesseract"
 	"github.com/LouYuanbo1/neru-core/vision/ocr/visionframework"
 )
@@ -18,7 +18,7 @@ import (
 // exposes for rectangle and saliency detection. When Vision cannot be bound
 // (an ancient macOS), a local tesseract is used instead, and the error names
 // both options when neither exists.
-func New() (ocr.Recognizer, error) {
+func New() (engine.Recognizer, error) {
 	vision, visionErr := visionframework.New(visionframework.Options{})
 	if visionErr == nil {
 		return vision, nil

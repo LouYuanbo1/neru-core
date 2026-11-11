@@ -5,9 +5,9 @@
 //
 // It is the frame source the capture package wires in beside its X11 backend:
 // Available reports whether this session looks like Wayland, and the two
-// capture functions return a Frame with the pixels, their origin on the desktop
-// and the scale that maps logical to frame pixels. When the session is not
-// Wayland, or the compositor does not implement screencopy, every call fails
+// capture functions return a pixels.Frame with the pixels, their origin on the
+// desktop and the scale that maps logical to frame pixels. When the session is
+// not Wayland, or the compositor does not implement screencopy, every call fails
 // with errs.CodeNotSupported so a caller can fall back instead of treating it
 // as a broken desktop.
 //
@@ -23,23 +23,8 @@ import (
 
 	"github.com/LouYuanbo1/neru-core/errs"
 	wl "github.com/LouYuanbo1/neru-core/internal/wayland"
+	"github.com/LouYuanbo1/neru-core/vision/pixels"
 )
-
-// Frame is one captured screen area: the pixels and where they belong on the
-// desktop.
-type Frame struct {
-	// Img is the captured pixels in RGBA, its rectangle anchored at (0,0).
-	Img *image.RGBA
-	// Origin is where the frame's top-left corner sits on the desktop, in
-	// logical pixels.
-	Origin image.Point
-	// Scale is frame pixels per logical pixel, at least 1.
-	Scale float64
-	// Region is the logical desktop area the frame covers. It is the requested
-	// region clipped to one output, so a request that straddles two outputs
-	// yields only the part that belongs to the output holding its centre.
-	Region image.Rectangle
-}
 
 // captureTimeout bounds one capture exchange. A local compositor answers a 4K
 // grab in tens of milliseconds; this is only a bound for a wedged one. Output
@@ -58,13 +43,13 @@ func Available() bool {
 // primary output, so this uses the first output the compositor advertises
 // (ordered by wl_registry name, which is stable for the session). Origin and
 // Region are that output's logical layout rectangle.
-func CaptureScreen(ctx context.Context) (Frame, error) {
+func CaptureScreen(ctx context.Context) (pixels.Frame, error) {
 	if err := checkContext(ctx); err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 
 	if !Available() {
-		return Frame{}, notAvailable()
+		return pixels.Frame{}, notAvailable()
 	}
 
 	captureCtx, cancel := context.WithTimeout(ctx, captureTimeout)
@@ -72,17 +57,17 @@ func CaptureScreen(ctx context.Context) (Frame, error) {
 
 	conn, err := wl.Dial()
 	if err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 	defer conn.Close()
 
 	outputs, err := conn.Outputs()
 	if err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 
 	if len(outputs) == 0 {
-		return Frame{}, errs.New(
+		return pixels.Frame{}, errs.New(
 			errs.CodeNotSupported,
 			"the Wayland compositor reports no outputs to capture",
 		)
@@ -92,10 +77,10 @@ func CaptureScreen(ctx context.Context) (Frame, error) {
 
 	img, origin, scale, err := conn.CaptureOutput(captureCtx, output)
 	if err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 
-	return Frame{
+	return pixels.Frame{
 		Img:    img,
 		Origin: origin,
 		Scale:  scale,
@@ -108,14 +93,14 @@ func CaptureScreen(ctx context.Context) (Frame, error) {
 // top-left and Region is the area actually returned, so a caller can place the
 // pixels exactly. An empty region is refused with CodeInvalidInput rather than
 // widened to the whole screen.
-func CaptureRect(ctx context.Context, region image.Rectangle) (Frame, error) {
+func CaptureRect(ctx context.Context, region image.Rectangle) (pixels.Frame, error) {
 	if err := checkContext(ctx); err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 
 	region = region.Canon()
 	if region.Empty() {
-		return Frame{}, errs.Newf(
+		return pixels.Frame{}, errs.Newf(
 			errs.CodeInvalidInput,
 			"region capture needs a region to capture; %v is empty",
 			region,
@@ -123,7 +108,7 @@ func CaptureRect(ctx context.Context, region image.Rectangle) (Frame, error) {
 	}
 
 	if !Available() {
-		return Frame{}, notAvailable()
+		return pixels.Frame{}, notAvailable()
 	}
 
 	captureCtx, cancel := context.WithTimeout(ctx, captureTimeout)
@@ -131,17 +116,17 @@ func CaptureRect(ctx context.Context, region image.Rectangle) (Frame, error) {
 
 	conn, err := wl.Dial()
 	if err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 	defer conn.Close()
 
 	img, origin, scale, err := conn.CaptureRegion(captureCtx, region)
 	if err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 
 	if scale <= 0 {
-		return Frame{}, errs.New(
+		return pixels.Frame{}, errs.New(
 			errs.CodeInternal,
 			"the Wayland capture reported a non-positive scale",
 		)
@@ -150,7 +135,7 @@ func CaptureRect(ctx context.Context, region image.Rectangle) (Frame, error) {
 	logicalWidth := int(math.Round(float64(img.Rect.Dx()) / scale))
 	logicalHeight := int(math.Round(float64(img.Rect.Dy()) / scale))
 
-	return Frame{
+	return pixels.Frame{
 		Img:    img,
 		Origin: origin,
 		Scale:  scale,

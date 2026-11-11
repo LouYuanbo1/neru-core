@@ -9,8 +9,13 @@ import (
 
 // New returns the macOS accessibility backend.
 func New(opts Options) (ax.Client, error) {
+	roles, err := opts.clickableRoles()
+	if err != nil {
+		return nil, err
+	}
+
 	client, err := darwin.New(darwin.Options{
-		ClickableRoles: opts.ClickableRoles,
+		ClickableRoles: roles,
 		MaxDepth:       opts.MaxDepth,
 		MaxNodes:       opts.MaxNodes,
 		SkipHitTest:    opts.SkipHitTest,

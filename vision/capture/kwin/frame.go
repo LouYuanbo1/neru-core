@@ -2,29 +2,10 @@ package kwin
 
 import (
 	"image"
-	"image/draw"
 	"math"
 
-	"github.com/LouYuanbo1/neru-core/errs"
+	"github.com/LouYuanbo1/neru-core/vision/pixels"
 )
-
-// Frame is one captured screen area: the pixels, where they belong on the
-// desktop, and the scale between the two.
-type Frame struct {
-	// Img is the captured pixels in RGBA, its rectangle anchored at (0,0).
-	Img *image.RGBA
-	// Origin is where the frame's top-left corner sits on the desktop, in
-	// logical pixels. It can be negative on a layout with an output left of or
-	// above the primary one.
-	Origin image.Point
-	// Scale is frame pixels per logical pixel, at least 1. KWin's reply carries
-	// it, so a 2x output reports 2 whenever the reply is new enough to say so.
-	Scale float64
-	// Region is the logical desktop area the frame covers. Img holds that area
-	// at Scale, so Region.Dx()*Scale is the image's width whenever KWin's
-	// pixels and its layout agree.
-	Region image.Rectangle
-}
 
 // layout is the logical desktop the compositor reports: the union of its
 // outputs' rectangles, plus each output's rectangle. known is false when no
@@ -57,14 +38,14 @@ type layout struct {
 //     image's own logical size. That is exact for a single unscaled output and
 //     an approximation for a multi-output or scaled desktop, where only the
 //     pixels are trustworthy and the caller's region may not line up with them.
-func placeScreen(img *image.RGBA, meta metadata, l layout) Frame {
+func placeScreen(img *image.RGBA, meta metadata, l layout) pixels.Frame {
 	size := img.Rect.Size()
 
 	scale := meta.scaleOr(1)
 	logical := logicalSize(size, scale)
 
 	if !l.known || l.bounds.Empty() {
-		return Frame{
+		return pixels.Frame{
 			Img:    img,
 			Origin: image.Point{},
 			Scale:  scale,
@@ -74,14 +55,14 @@ func placeScreen(img *image.RGBA, meta metadata, l layout) Frame {
 
 	if meta.hasScale {
 		if rect, ok := l.match(logical); ok {
-			return Frame{Img: img, Origin: rect.Min, Scale: scale, Region: rect}
+			return pixels.Frame{Img: img, Origin: rect.Min, Scale: scale, Region: rect}
 		}
 
 		// The image is not one output or the whole desktop at that scale, for
 		// example because the outputs mix scales. Anchoring it at the layout's
 		// origin and reporting only the part it covers keeps the frame from
 		// claiming desktop it has no pixels for.
-		return Frame{
+		return pixels.Frame{
 			Img:    img,
 			Origin: l.bounds.Min,
 			Scale:  scale,
@@ -90,12 +71,12 @@ func placeScreen(img *image.RGBA, meta metadata, l layout) Frame {
 	}
 
 	if rect, inferred, ok := l.fit(size); ok {
-		return Frame{Img: img, Origin: rect.Min, Scale: inferred, Region: rect}
+		return pixels.Frame{Img: img, Origin: rect.Min, Scale: inferred, Region: rect}
 	}
 
 	scale = 1
 
-	return Frame{
+	return pixels.Frame{
 		Img:    img,
 		Origin: l.bounds.Min,
 		Scale:  scale,
@@ -111,7 +92,7 @@ func placeScreen(img *image.RGBA, meta metadata, l layout) Frame {
 // so the requested region is authoritative and only the image's actual size
 // decides how much of it exists: an image smaller than the request narrows the
 // reported region, which keeps Region honest about the pixels.
-func placeArea(img *image.RGBA, meta metadata, region image.Rectangle) Frame {
+func placeArea(img *image.RGBA, meta metadata, region image.Rectangle) pixels.Frame {
 	scale := 1.0
 
 	if meta.hasScale && meta.scale >= 1 {
@@ -119,10 +100,10 @@ func placeArea(img *image.RGBA, meta metadata, region image.Rectangle) Frame {
 	} else if region.Dx() > 0 && img.Rect.Dx() > 0 {
 		// A reply without a scale still rendered at some scale; the ratio
 		// between the pixels and the requested logical width is it.
-		scale = deriveScale(img.Rect.Dx(), region.Dx())
+		scale = pixels.DeriveScale(img.Rect.Dx(), region.Dx())
 	}
 
-	return Frame{
+	return pixels.Frame{
 		Img:    img,
 		Origin: region.Min,
 		Scale:  scale,
@@ -205,92 +186,4 @@ func logicalSize(size image.Point, scale float64) image.Point {
 // describes.
 func covered(size image.Point, at image.Point, within image.Rectangle) image.Rectangle {
 	return image.Rect(at.X, at.Y, at.X+size.X, at.Y+size.Y).Intersect(within)
-}
-
-// deriveScale computes frame pixels per logical pixel from the image's width and
-// the logical width it covers. The layout's logical size is a quotient of the
-// compositor's mode and the output scale, rounded to a whole pixel, so the ratio
-// is rounded to two decimals to recover 1.5 rather than 1.4997.
-//
-// A ratio below 1 is clamped to 1, which is what Frame promises. That only
-// happens when the image has fewer pixels than the area has logical columns,
-// and placeArea then reports the smaller region the pixels actually cover.
-func deriveScale(frameWidth, logicalWidth int) float64 {
-	if frameWidth <= 0 || logicalWidth <= 0 {
-		return 1
-	}
-
-	scale := float64(frameWidth) / float64(logicalWidth)
-	if scale < 1 {
-		return 1
-	}
-
-	return math.Round(scale*100) / 100
-}
-
-// crop returns the part of frame that covers region, a logical desktop
-// rectangle. Region is region intersected with the frame's own region and
-// Origin is that intersection's top-left, so a caller that asked for a window
-// hanging off the desktop gets the pixels that exist and can see that they were
-// clipped.
-//
-// The pixel rectangle is derived from the logical offset through the frame's
-// scale and then clipped to the image, because rounding at a fractional scale
-// can ask for a row or column the image does not have.
-func crop(frame Frame, region image.Rectangle) (Frame, error) {
-	clipped := region.Canon().Intersect(frame.Region)
-	if clipped.Empty() {
-		return Frame{}, errs.Newf(
-			errs.CodeInvalidInput,
-			"region %v lies outside the captured desktop %v",
-			region,
-			frame.Region,
-		)
-	}
-
-	pixels := pixelRect(clipped, frame.Region.Min, frame.Scale, frame.Img.Rect)
-	if pixels.Empty() {
-		return Frame{}, errs.Newf(
-			errs.CodeInvalidInput,
-			"region %v maps to no pixel of the captured desktop %v at scale %v",
-			region,
-			frame.Region,
-			frame.Scale,
-		)
-	}
-
-	return Frame{
-		Img:    cropImage(frame.Img, pixels),
-		Origin: clipped.Min,
-		Scale:  frame.Scale,
-		Region: clipped,
-	}, nil
-}
-
-// pixelRect maps a logical rectangle inside a frame onto the frame's pixels.
-// min is the frame's logical origin and bounds is the image, which the result
-// is clipped to.
-func pixelRect(logical image.Rectangle, min image.Point, scale float64, bounds image.Rectangle) image.Rectangle {
-	if scale <= 0 {
-		scale = 1
-	}
-
-	pixels := image.Rect(
-		int(math.Round(float64(logical.Min.X-min.X)*scale)),
-		int(math.Round(float64(logical.Min.Y-min.Y)*scale)),
-		int(math.Round(float64(logical.Max.X-min.X)*scale)),
-		int(math.Round(float64(logical.Max.Y-min.Y)*scale)),
-	)
-
-	return pixels.Intersect(bounds)
-}
-
-// cropImage copies pixels out of src into a new image anchored at (0,0), so a
-// cropped frame does not keep the whole screenshot alive and its rectangle
-// starts where a caller expects it to.
-func cropImage(src *image.RGBA, pixels image.Rectangle) *image.RGBA {
-	dst := image.NewRGBA(image.Rect(0, 0, pixels.Dx(), pixels.Dy()))
-	draw.Draw(dst, dst.Rect, src, pixels.Min, draw.Src)
-
-	return dst
 }

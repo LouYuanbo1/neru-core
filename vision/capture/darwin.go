@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/LouYuanbo1/neru-core/errs"
+	"github.com/LouYuanbo1/neru-core/vision/pixels"
 )
 
 // The macOS backend captures through ScreenCaptureKit first, which is
@@ -108,7 +109,7 @@ func runCapture(ctx context.Context, region image.Rectangle) (*image.RGBA, error
 // scale, so a full-screen shot is measured in real frame pixels per logical
 // pixel; the screencapture fallback cannot know the logical size and reports
 // the captured bitmap as the region with scale 1.
-func captureScreen(ctx context.Context) (Shot, error) {
+func captureScreen(ctx context.Context) (pixels.Frame, error) {
 	if shot, err := captureWithScreenCaptureKit(ctx, image.Rectangle{}); err == nil {
 		return shot, nil
 	}
@@ -120,10 +121,10 @@ func captureScreen(ctx context.Context) (Shot, error) {
 	// (macOS puts the missing permission on stderr).
 	img, err := runCapture(ctx, image.Rectangle{})
 	if err != nil {
-		return Shot{}, err
+		return pixels.Frame{}, err
 	}
 
-	return Shot{
+	return pixels.Frame{
 		Img:    img,
 		Origin: image.Point{},
 		Scale:  1,
@@ -138,14 +139,14 @@ func captureScreen(ctx context.Context) (Shot, error) {
 // displays. Origin is the region's top-left corner and Region the region
 // itself. A failure falls back to the same screencapture call this backend has
 // always used, whose error is the one reported.
-func captureRect(ctx context.Context, region image.Rectangle) (Shot, error) {
+func captureRect(ctx context.Context, region image.Rectangle) (pixels.Frame, error) {
 	if err := ctx.Err(); err != nil {
-		return Shot{}, errs.Wrap(ctx.Err(), errs.CodeContextCanceled, "capture canceled")
+		return pixels.Frame{}, errs.Wrap(ctx.Err(), errs.CodeContextCanceled, "capture canceled")
 	}
 
 	region = region.Canon()
 	if region.Empty() {
-		return Shot{}, errs.Newf(
+		return pixels.Frame{}, errs.Newf(
 			errs.CodeInvalidInput,
 			"region capture needs a region to capture; %v is empty",
 			region,
@@ -158,7 +159,7 @@ func captureRect(ctx context.Context, region image.Rectangle) (Shot, error) {
 
 	img, err := runCapture(ctx, region)
 	if err != nil {
-		return Shot{}, err
+		return pixels.Frame{}, err
 	}
 
 	scale := float64(img.Rect.Dx()) / float64(region.Dx())
@@ -166,7 +167,7 @@ func captureRect(ctx context.Context, region image.Rectangle) (Shot, error) {
 		scale = 1
 	}
 
-	return Shot{
+	return pixels.Frame{
 		Img:    img,
 		Origin: region.Min,
 		Scale:  scale,

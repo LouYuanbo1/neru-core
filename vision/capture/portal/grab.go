@@ -6,6 +6,8 @@ import (
 	"context"
 
 	"github.com/godbus/dbus/v5"
+
+	"github.com/LouYuanbo1/neru-core/vision/pixels"
 )
 
 // grab runs one screenshot request and returns the frame it produced: the
@@ -19,7 +21,7 @@ import (
 // is installed before the method call because the portal is allowed to answer
 // the moment the call returns, and the request handle the call returns is
 // accepted beside the one its token predicts.
-func grab(ctx context.Context) (Frame, error) {
+func grab(ctx context.Context) (pixels.Frame, error) {
 	ctx, cancel := withBudget(ctx)
 	defer cancel()
 
@@ -27,13 +29,13 @@ func grab(ctx context.Context) (Frame, error) {
 
 	conn, err := dialSessionBus(ctx)
 	if err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 	defer conn.Close()
 
 	sender, err := uniqueName(conn)
 	if err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 
 	token := nextRequestToken()
@@ -49,12 +51,12 @@ func grab(ctx context.Context) (Frame, error) {
 		dbus.WithMatchPathNamespace(dbus.ObjectPath(requestNamespace(sender))),
 	)
 	if err != nil {
-		return Frame{}, portalCallError(err, "could not subscribe to the screenshot portal's answer")
+		return pixels.Frame{}, portalCallError(err, "could not subscribe to the screenshot portal's answer")
 	}
 
 	handle, err := callScreenshot(ctx, conn, token)
 	if err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 
 	handles := []dbus.ObjectPath{derived}
@@ -64,24 +66,24 @@ func grab(ctx context.Context) (Frame, error) {
 
 	results, err := awaitResponse(ctx, signals, requestNamespace(sender), handles)
 	if err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 
 	path, err := resultFilePath(results)
 	if err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 
 	img, err := decodeFile(path)
 	if err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 
 	// Decoding a 4K PNG takes long enough that the caller may have given up
 	// meanwhile, and returning pixels nobody waits for would report a capture
 	// that the caller already counts as canceled.
 	if err := checkContext(ctx); err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 
 	return place(img, <-probed), nil

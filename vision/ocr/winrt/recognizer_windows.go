@@ -13,7 +13,7 @@ import (
 	"unsafe"
 
 	"github.com/LouYuanbo1/neru-core/errs"
-	"github.com/LouYuanbo1/neru-core/vision/ocr"
+	"github.com/LouYuanbo1/neru-core/vision/ocr/engine"
 )
 
 // Text recognition through Windows.Media.Ocr.
@@ -117,8 +117,8 @@ type Recognizer struct {
 }
 
 var (
-	_ ocr.Recognizer    = (*Recognizer)(nil)
-	_ ocr.HealthChecker = (*Recognizer)(nil)
+	_ engine.Recognizer    = (*Recognizer)(nil)
+	_ engine.HealthChecker = (*Recognizer)(nil)
 )
 
 // New returns a recognizer for Windows.Media.Ocr.
@@ -167,8 +167,8 @@ func New(options ...Options) (*Recognizer, error) {
 func (r *Recognizer) Recognize(
 	ctx context.Context,
 	img *image.RGBA,
-	opts ocr.Options,
-) ([]ocr.Word, error) {
+	opts engine.Options,
+) ([]engine.Word, error) {
 	if r == nil || r.closed.Load() {
 		return nil, errClosed()
 	}
@@ -193,7 +193,7 @@ func (r *Recognizer) Recognize(
 	tags := effectiveLanguages(r.options.Languages, opts.Languages)
 	wordLevel := opts.WordLevel
 
-	var words []ocr.Word
+	var words []engine.Word
 
 	err := r.worker.do(ctx, "text recognition", func() error {
 		// Close may have been called while this request waited its turn. The
@@ -409,12 +409,12 @@ func (w *ocrWorker) ensureEngine(tags []string) error {
 		)
 	}
 
-	engine, err := w.createEngine(statics, tags)
+	comEngine, err := w.createEngine(statics, tags)
 	if err != nil {
 		return err
 	}
 
-	w.engine = engine
+	w.engine = comEngine
 	w.engineKey = key
 	w.maxImage = int(maxImage)
 
@@ -425,12 +425,12 @@ func (w *ocrWorker) ensureEngine(tags []string) error {
 // language profile when tags is empty. Worker thread only.
 func (w *ocrWorker) createEngine(statics unsafe.Pointer, tags []string) (unsafe.Pointer, error) {
 	if len(tags) == 0 {
-		var engine unsafe.Pointer
+		var comEngine unsafe.Pointer
 
 		hresult := winrtCall(
 			statics,
 			ocrEngineStaticsTryCreateUserProfile,
-			uintptr(unsafe.Pointer(&engine)),
+			uintptr(unsafe.Pointer(&comEngine)),
 		)
 		if hresultFailed(hresult) {
 			return nil, errs.Wrap(
@@ -442,21 +442,21 @@ func (w *ocrWorker) createEngine(statics unsafe.Pointer, tags []string) (unsafe.
 
 		// A null engine with S_OK is the documented answer for "none of the
 		// profile languages has an OCR pack installed".
-		if engine == nil {
+		if comEngine == nil {
 			return nil, errNoLanguagePack()
 		}
 
-		return engine, nil
+		return comEngine, nil
 	}
 
 	for _, tag := range tags {
-		engine, err := w.createEngineForTag(statics, tag)
+		comEngine, err := w.createEngineForTag(statics, tag)
 		if err != nil {
 			return nil, err
 		}
 
-		if engine != nil {
-			return engine, nil
+		if comEngine != nil {
+			return comEngine, nil
 		}
 	}
 
@@ -476,13 +476,13 @@ func (w *ocrWorker) createEngineForTag(
 	}
 	defer releaseObject(language)
 
-	var engine unsafe.Pointer
+	var comEngine unsafe.Pointer
 
 	hresult := winrtCall(
 		statics,
 		ocrEngineStaticsTryCreateFromLanguage,
 		uintptr(language),
-		uintptr(unsafe.Pointer(&engine)),
+		uintptr(unsafe.Pointer(&comEngine)),
 	)
 	if hresultFailed(hresult) {
 		return nil, errs.Wrap(
@@ -492,11 +492,11 @@ func (w *ocrWorker) createEngineForTag(
 		)
 	}
 
-	if engine == nil {
+	if comEngine == nil {
 		return nil, nil
 	}
 
-	return engine, nil
+	return comEngine, nil
 }
 
 // languageFromTag builds the Windows.Globalization.Language object the statics
@@ -572,7 +572,7 @@ func (w *ocrWorker) recognize(
 	ctx context.Context,
 	img *image.RGBA,
 	wordLevel bool,
-) ([]ocr.Word, error) {
+) ([]engine.Word, error) {
 	factor := downsampleFactor(img.Bounds(), w.maxImage)
 
 	frame := img
@@ -831,14 +831,14 @@ func softwareBitmapFrom(img *image.RGBA) (unsafe.Pointer, error) {
 	return bitmap, nil
 }
 
-// collectWords walks the result's lines and words into ocr.Words, scaling each
+// collectWords walks the result's lines and words into engine.Words, scaling each
 // box by factor to undo the downsample the frame went through.
 func collectWords(
 	result unsafe.Pointer,
 	wordLevel bool,
 	factor int,
 	bounds image.Rectangle,
-) ([]ocr.Word, error) {
+) ([]engine.Word, error) {
 	var linesPtr unsafe.Pointer
 
 	hresult := winrtCall(result, ocrResultLines, uintptr(unsafe.Pointer(&linesPtr)))
@@ -862,7 +862,7 @@ func collectWords(
 		)
 	}
 
-	words := make([]ocr.Word, 0, count)
+	words := make([]engine.Word, 0, count)
 
 	for index := range count {
 		line, lineErr := lines.at(index)
@@ -890,12 +890,12 @@ func collectWords(
 // no text, and boxes that clip to nothing, are dropped: a caller asking for a
 // region's text has nothing to do with either.
 func appendLine(
-	words []ocr.Word,
+	words []engine.Word,
 	line unsafe.Pointer,
 	wordLevel bool,
 	factor int,
 	bounds image.Rectangle,
-) ([]ocr.Word, error) {
+) ([]engine.Word, error) {
 	var wordsPtr unsafe.Pointer
 
 	hresult := winrtCall(line, ocrLineWords, uintptr(unsafe.Pointer(&wordsPtr)))
@@ -948,7 +948,7 @@ func appendLine(
 
 		if wordLevel {
 			if text := inspectableText(word, ocrWordText); text != "" && !box.Empty() {
-				words = append(words, ocr.Word{
+				words = append(words, engine.Word{
 					Text:       text,
 					Bounds:     box,
 					Confidence: wordConfidence,
@@ -963,7 +963,7 @@ func appendLine(
 
 	if !wordLevel && !lineBounds.Empty() {
 		if text := inspectableText(line, ocrLineText); text != "" {
-			words = append(words, ocr.Word{
+			words = append(words, engine.Word{
 				Text:       text,
 				Bounds:     lineBounds,
 				Confidence: wordConfidence,

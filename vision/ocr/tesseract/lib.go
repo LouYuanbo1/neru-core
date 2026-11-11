@@ -11,7 +11,7 @@ import (
 
 	"github.com/LouYuanbo1/neru-core/errs"
 	"github.com/LouYuanbo1/neru-core/internal/native"
-	"github.com/LouYuanbo1/neru-core/vision/ocr"
+	"github.com/LouYuanbo1/neru-core/vision/ocr/engine"
 )
 
 // LibraryOptions configure the in-process libtesseract recognizer.
@@ -178,8 +178,8 @@ func (r *LibraryRecognizer) Health(context.Context) error {
 func (r *LibraryRecognizer) Recognize(
 	ctx context.Context,
 	img *image.RGBA,
-	opts ocr.Options,
-) ([]ocr.Word, error) {
+	opts engine.Options,
+) ([]engine.Word, error) {
 	if img == nil || img.Rect.Dx() <= 0 || img.Rect.Dy() <= 0 {
 		return nil, errs.New(errs.CodeInvalidInput, "tesseract needs a non-empty frame")
 	}
@@ -202,7 +202,7 @@ func (r *LibraryRecognizer) Recognize(
 
 	language := r.language(opts)
 
-	engine, err := r.engine(symbols, language)
+	api, err := r.apiFor(symbols, language)
 	if err != nil {
 		return nil, err
 	}
@@ -210,14 +210,14 @@ func (r *LibraryRecognizer) Recognize(
 	width, height := int32(img.Rect.Dx()), int32(img.Rect.Dy())
 	stride := int32(img.Stride)
 
-	symbols.setImage(engine, unsafe.Pointer(&img.Pix[0]), width, height, tessBytesPerPixel, stride)
-	symbols.setSourceResolution(engine, tessSourceDPI)
+	symbols.setImage(api, unsafe.Pointer(&img.Pix[0]), width, height, tessBytesPerPixel, stride)
+	symbols.setSourceResolution(api, tessSourceDPI)
 
 	if err := ctx.Err(); err != nil {
 		return nil, errs.Wrap(err, errs.CodeContextCanceled, "text recognition canceled")
 	}
 
-	iterator := symbols.getIterator(engine)
+	iterator := symbols.getIterator(api)
 	if iterator == 0 {
 		return nil, errs.New(errs.CodeAccessibilityFailed, "tesseract produced no result iterator")
 	}
@@ -229,7 +229,7 @@ func (r *LibraryRecognizer) Recognize(
 		level = tessPageIteratorWord
 	}
 
-	var words []ocr.Word
+	var words []engine.Word
 
 	for {
 		text := symbols.resultText(iterator, level)
@@ -244,7 +244,7 @@ func (r *LibraryRecognizer) Recognize(
 			symbols.deleteText(text)
 
 			if value != "" && boxed && right > left && bottom > top {
-				words = append(words, ocr.Word{
+				words = append(words, engine.Word{
 					Text:       value,
 					Bounds:     image.Rect(int(left), int(top), int(right), int(bottom)),
 					Confidence: confidence,
@@ -274,7 +274,7 @@ func (r *LibraryRecognizer) Recognize(
 
 // language returns the language string for this call: per-call languages win,
 // then the configured one, then "eng".
-func (r *LibraryRecognizer) language(opts ocr.Options) string {
+func (r *LibraryRecognizer) language(opts engine.Options) string {
 	languages := opts.Languages
 	if len(languages) == 0 && r.options.Language != "" {
 		languages = []string{r.options.Language}
@@ -295,8 +295,8 @@ func (r *LibraryRecognizer) language(opts ocr.Options) string {
 	return strings.Join(clean, "+")
 }
 
-// engine returns the cached engine for a language, creating it on first use.
-func (r *LibraryRecognizer) engine(symbols *tesseractSymbols, language string) (uintptr, error) {
+// apiFor returns the cached TessBaseAPI for a language, creating it on first use.
+func (r *LibraryRecognizer) apiFor(symbols *tesseractSymbols, language string) (uintptr, error) {
 	key := r.options.DataPath + "\x00" + language
 	if cached, ok := r.engines[key]; ok {
 		return cached, nil
@@ -407,5 +407,5 @@ func clampConfidence(value float32) float64 {
 	return float64(value)
 }
 
-var _ ocr.Recognizer = (*LibraryRecognizer)(nil)
-var _ ocr.HealthChecker = (*LibraryRecognizer)(nil)
+var _ engine.Recognizer = (*LibraryRecognizer)(nil)
+var _ engine.HealthChecker = (*LibraryRecognizer)(nil)

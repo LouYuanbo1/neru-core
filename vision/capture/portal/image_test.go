@@ -55,39 +55,6 @@ func TestToRGBA_PremultipliesATranslucentPixel(t *testing.T) {
 	}
 }
 
-func TestCropImage_CopiesTheRequestedPixels(t *testing.T) {
-	src := image.NewRGBA(image.Rect(0, 0, 4, 4))
-
-	for y := range 4 {
-		for x := range 4 {
-			src.SetRGBA(x, y, color.RGBA{R: uint8(x), G: uint8(y), B: 0, A: 255})
-		}
-	}
-
-	got := cropImage(src, image.Rect(1, 1, 3, 3))
-
-	if got.Rect != image.Rect(0, 0, 2, 2) {
-		t.Fatalf("rect = %v, want (0,0)-(2,2)", got.Rect)
-	}
-
-	if got.Stride != 2*4 {
-		t.Errorf("stride = %d, want a tightly packed 2-pixel row", got.Stride)
-	}
-
-	if got.RGBAAt(0, 0) != (color.RGBA{R: 1, G: 1, B: 0, A: 255}) {
-		t.Errorf("pixel (0,0) = %v, want the source's (1,1)", got.RGBAAt(0, 0))
-	}
-
-	// The crop must own its pixels: a frame that shared the screenshot's
-	// storage would keep the whole picture alive and would change underneath a
-	// caller when the source was reused.
-	src.SetRGBA(1, 1, color.RGBA{R: 9, G: 9, B: 9, A: 255})
-
-	if got.RGBAAt(0, 0).R == 9 {
-		t.Error("the crop shares its pixels with the screenshot it came from")
-	}
-}
-
 func TestDecodeFile_ReadsThePNGThePortalWrote(t *testing.T) {
 	path := writePNG(t, pngImage())
 

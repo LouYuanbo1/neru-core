@@ -11,6 +11,7 @@ import (
 	"github.com/godbus/dbus/v5"
 
 	"github.com/LouYuanbo1/neru-core/errs"
+	"github.com/LouYuanbo1/neru-core/vision/pixels"
 )
 
 // grabScreen runs one whole-output capture and returns the frame it produced.
@@ -21,7 +22,7 @@ import (
 // slowly than KWin does. The interface is read from introspection before the
 // call so a KWin that cannot name its active output is refused with a reason
 // instead of being asked for the wrong screen.
-func grabScreen(ctx context.Context) (Frame, error) {
+func grabScreen(ctx context.Context) (pixels.Frame, error) {
 	ctx, cancel := withBudget(ctx)
 	defer cancel()
 
@@ -29,18 +30,18 @@ func grabScreen(ctx context.Context) (Frame, error) {
 
 	conn, err := dialSessionBus(ctx)
 	if err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 	defer conn.Close()
 
 	service, capabilities, err := screenShotService(ctx, conn)
 	if err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 
 	method, ok := capabilities.screenCaptureMethod()
 	if !ok {
-		return Frame{}, errs.Newf(
+		return pixels.Frame{}, errs.Newf(
 			errs.CodeNotSupported,
 			"KWin's %s interface at %s exports neither %s nor %s, and this package "+
 				"will not call %s because it addresses an output by a name or index "+
@@ -55,14 +56,14 @@ func grabScreen(ctx context.Context) (Frame, error) {
 
 	meta, img, err := capturePipe(ctx, conn, service, method)
 	if err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 
 	// Reading the pixels takes long enough that the caller may have given up
 	// meanwhile, and returning a frame nobody waits for would report a capture
 	// the caller already counts as canceled.
 	if err := checkContext(ctx); err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 
 	return placeScreen(img, meta, <-probed), nil
@@ -75,7 +76,7 @@ func grabScreen(ctx context.Context) (Frame, error) {
 // that exists. Without a layout the region is passed through: KWin renders the
 // rectangle wherever it is and fills the part with no screen, which is the best
 // this package can do when it cannot read the desktop it is capturing.
-func grabRegion(ctx context.Context, region image.Rectangle) (Frame, error) {
+func grabRegion(ctx context.Context, region image.Rectangle) (pixels.Frame, error) {
 	ctx, cancel := withBudget(ctx)
 	defer cancel()
 
@@ -83,17 +84,17 @@ func grabRegion(ctx context.Context, region image.Rectangle) (Frame, error) {
 
 	conn, err := dialSessionBus(ctx)
 	if err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 	defer conn.Close()
 
 	service, capabilities, err := screenShotService(ctx, conn)
 	if err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 
 	if !capabilities.areaCapture() {
-		return Frame{}, errs.Newf(
+		return pixels.Frame{}, errs.Newf(
 			errs.CodeNotSupported,
 			"KWin's %s interface at %s does not export %s(i, i, u, u, a{sv}, h), "+
 				"so a region cannot be captured on this KWin",
@@ -106,7 +107,7 @@ func grabRegion(ctx context.Context, region image.Rectangle) (Frame, error) {
 	if desktop := <-probed; desktop.known {
 		clipped := region.Intersect(desktop.bounds)
 		if clipped.Empty() {
-			return Frame{}, errs.Newf(
+			return pixels.Frame{}, errs.Newf(
 				errs.CodeInvalidInput,
 				"region %v lies outside the captured desktop %v",
 				region,
@@ -120,7 +121,7 @@ func grabRegion(ctx context.Context, region image.Rectangle) (Frame, error) {
 	// The layout probe can consume the caller's budget on a wedged compositor;
 	// asking KWin for a frame nobody is waiting for would only fail later.
 	if err := checkContext(ctx); err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 
 	meta, img, err := capturePipe(
@@ -134,11 +135,11 @@ func grabRegion(ctx context.Context, region image.Rectangle) (Frame, error) {
 		uint32(region.Dy()),
 	)
 	if err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 
 	if err := checkContext(ctx); err != nil {
-		return Frame{}, err
+		return pixels.Frame{}, err
 	}
 
 	return placeArea(img, meta, region), nil

@@ -7,6 +7,8 @@ import (
 	"image"
 	"testing"
 	"time"
+
+	"github.com/LouYuanbo1/neru-core/vision/pixels"
 )
 
 // TestLiveCaptureScreen takes a real screenshot through KWin. It runs only under
@@ -59,7 +61,7 @@ func TestLiveCaptureRect(t *testing.T) {
 }
 
 // assertFrame checks the invariants every captured frame must satisfy.
-func assertFrame(t *testing.T, frame Frame) {
+func assertFrame(t *testing.T, frame pixels.Frame) {
 	t.Helper()
 
 	if frame.Img == nil {

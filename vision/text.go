@@ -5,7 +5,8 @@ import (
 	"strings"
 
 	"github.com/LouYuanbo1/neru-core/errs"
-	"github.com/LouYuanbo1/neru-core/vision/ocr"
+	"github.com/LouYuanbo1/neru-core/vision/ocr/engine"
+	"github.com/LouYuanbo1/neru-core/vision/pixels"
 )
 
 // ReadText recognizes the text in a frame and returns it joined into one
@@ -16,28 +17,35 @@ import (
 // that cannot run reports errs.CodeNotSupported through Health before any
 // pixels are read.
 //
+// opts may be nil, which asks for the engine's defaults and keeps the common
+// call free of an import of the engine package. Pass a value to choose the
+// languages, word level, or confidence floor.
+//
 // The result is screen content. The caller owns it; nothing here logs it.
 func ReadText(
 	ctx context.Context,
-	frame Frame,
-	recognizer ocr.Recognizer,
-	opts ocr.Options,
+	f pixels.Frame,
+	recognizer engine.Recognizer,
+	opts *engine.Options,
 ) (string, error) {
 	if recognizer == nil {
 		return "", errs.New(errs.CodeInvalidInput, "ReadText needs a text recognizer")
 	}
 
-	f := frame
-
-	if err := f.checkRegion(ctx, StrategyVision); err != nil {
+	if err := checkRegion(ctx, &f, StrategyVision); err != nil {
 		return "", err
 	}
 
-	if err := ocr.Health(ctx, recognizer); err != nil {
+	if err := engine.Health(ctx, recognizer); err != nil {
 		return "", err
 	}
 
-	words, err := recognizer.Recognize(ctx, f.Img, opts)
+	callOptions := engine.Options{}
+	if opts != nil {
+		callOptions = *opts
+	}
+
+	words, err := recognizer.Recognize(ctx, f.Img, callOptions)
 	if err != nil {
 		return "", err
 	}

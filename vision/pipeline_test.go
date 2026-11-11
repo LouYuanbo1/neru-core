@@ -9,19 +9,26 @@ import (
 	"github.com/LouYuanbo1/neru-core/element"
 	"github.com/LouYuanbo1/neru-core/errs"
 	"github.com/LouYuanbo1/neru-core/vision"
-	"github.com/LouYuanbo1/neru-core/vision/ocr"
+	"github.com/LouYuanbo1/neru-core/vision/ocr/engine"
+	"github.com/LouYuanbo1/neru-core/vision/pixels"
 )
 
 // fakeRecognizer answers with fixed words, so the pipeline can be tested
 // without an OCR engine.
 type fakeRecognizer struct {
-	words     []ocr.Word
+	words     []engine.Word
 	healthErr error
 	called    bool
+	options   engine.Options
 }
 
-func (f *fakeRecognizer) Recognize(context.Context, *image.RGBA, ocr.Options) ([]ocr.Word, error) {
+func (f *fakeRecognizer) Recognize(
+	_ context.Context,
+	_ *image.RGBA,
+	opts engine.Options,
+) ([]engine.Word, error) {
 	f.called = true
+	f.options = opts
 
 	return f.words, nil
 }
@@ -40,8 +47,8 @@ func (f fakeBoxes) Boxes(context.Context, *image.RGBA) ([]image.Rectangle, error
 
 // testFrame is a 200x100 capture placed at (100,100) on the desktop, at scale
 // one.
-func testFrame() vision.Frame {
-	return vision.Frame{
+func testFrame() pixels.Frame {
+	return pixels.Frame{
 		Img:    image.NewRGBA(image.Rect(0, 0, 200, 100)),
 		Origin: image.Pt(100, 100),
 		Region: image.Rect(100, 100, 300, 200),
@@ -52,7 +59,7 @@ func testFrame() vision.Frame {
 func TestPipeline_TextAndRectanglesMerge(t *testing.T) {
 	t.Parallel()
 
-	recognizer := &fakeRecognizer{words: []ocr.Word{
+	recognizer := &fakeRecognizer{words: []engine.Word{
 		{Text: "Save", Bounds: image.Rect(10, 10, 60, 30), Confidence: 0.9},
 	}}
 
@@ -146,7 +153,7 @@ func TestPipeline_HealthReportsTheRecognizerState(t *testing.T) {
 func TestPipeline_RectangleFailureIsToleratedWhenTextSucceeded(t *testing.T) {
 	t.Parallel()
 
-	recognizer := &fakeRecognizer{words: []ocr.Word{
+	recognizer := &fakeRecognizer{words: []engine.Word{
 		{Text: "Save", Bounds: image.Rect(10, 10, 60, 30), Confidence: 0.9},
 	}}
 
@@ -170,7 +177,7 @@ func TestPipeline_RectangleFailureIsToleratedWhenTextSucceeded(t *testing.T) {
 func TestPipeline_ScaleMapsPixelsOntoTheDesktop(t *testing.T) {
 	t.Parallel()
 
-	frame := vision.Frame{
+	frame := pixels.Frame{
 		Img:    image.NewRGBA(image.Rect(0, 0, 400, 200)),
 		Origin: image.Pt(50, 60),
 		Region: image.Rect(50, 60, 250, 160),

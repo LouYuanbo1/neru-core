@@ -6,7 +6,7 @@ import (
 	"context"
 	"image"
 
-	"github.com/LouYuanbo1/neru-core/vision/ocr"
+	"github.com/LouYuanbo1/neru-core/vision/ocr/engine"
 )
 
 // Recognizer is what every non-Windows build provides: a handle that refuses
@@ -20,8 +20,8 @@ type Recognizer struct {
 }
 
 var (
-	_ ocr.Recognizer    = (*Recognizer)(nil)
-	_ ocr.HealthChecker = (*Recognizer)(nil)
+	_ engine.Recognizer    = (*Recognizer)(nil)
+	_ engine.HealthChecker = (*Recognizer)(nil)
 )
 
 // New reports CodeNotSupported: Windows.Media.Ocr is a Windows component.
@@ -33,8 +33,8 @@ func New(options ...Options) (*Recognizer, error) {
 func (r *Recognizer) Recognize(
 	context.Context,
 	*image.RGBA,
-	ocr.Options,
-) ([]ocr.Word, error) {
+	engine.Options,
+) ([]engine.Word, error) {
 	return nil, errNotWindows()
 }
 

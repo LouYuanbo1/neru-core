@@ -1,8 +1,9 @@
 // Package element provides the platform-neutral domain model for UI elements.
 //
-// An Element is found either in an accessibility tree (via an ax adapter) or
-// on screen (via a vision adapter). Elements are immutable after creation, so
-// goroutines can share them.
+// An Element is built either from an accessibility node, through
+// accessibility.FromNode, or from a region a pixel detector found, through the
+// vision package. Elements are immutable after creation, so goroutines can
+// share them.
 //
 // The model deliberately carries no platform vocabulary: Role uses neutral
 // logical names, not macOS "AX*" strings. Platform backends translate their

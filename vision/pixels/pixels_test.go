@@ -1,4 +1,4 @@
-package frame_test
+package pixels_test
 
 import (
 	"image"
@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/LouYuanbo1/neru-core/vision/frame"
+	"github.com/LouYuanbo1/neru-core/vision/pixels"
 )
 
 func TestDownsample_AveragesEachBlock(t *testing.T) {
@@ -23,7 +23,7 @@ func TestDownsample_AveragesEachBlock(t *testing.T) {
 		img.SetRGBA(x, 1, color.RGBA{255, 255, 255, 255})
 	}
 
-	out := frame.Downsample(img, 2)
+	out := pixels.Downsample(img, 2)
 
 	if got := out.Bounds(); got != image.Rect(0, 0, 2, 1) {
 		t.Fatalf("Bounds() = %v, want 2x1", got)
@@ -44,7 +44,7 @@ func TestDownsample_OddEdgeAveragesWhatItHolds(t *testing.T) {
 	img := image.NewRGBA(image.Rect(0, 0, 3, 1))
 	img.SetRGBA(2, 0, color.RGBA{90, 90, 90, 255})
 
-	out := frame.Downsample(img, 2)
+	out := pixels.Downsample(img, 2)
 
 	if got := out.Bounds(); got != image.Rect(0, 0, 2, 1) {
 		t.Fatalf("Bounds() = %v, want 2x1", got)
@@ -59,7 +59,7 @@ func TestDownsample_FactorOneIsTheSameFrame(t *testing.T) {
 	t.Parallel()
 
 	img := image.NewRGBA(image.Rect(0, 0, 3, 3))
-	if frame.Downsample(img, 1) != img {
+	if pixels.Downsample(img, 1) != img {
 		t.Error("Downsample(img, 1) should return img itself")
 	}
 }
@@ -70,7 +70,7 @@ func TestRows_CoversEveryRowOnce(t *testing.T) {
 	for _, height := range []int{0, 1, 7, 1081} {
 		seen := make([]atomic.Int32, height)
 
-		frame.Rows(height, func(y0, y1 int) {
+		pixels.Rows(height, func(y0, y1 int) {
 			for y := y0; y < y1; y++ {
 				seen[y].Add(1)
 			}
@@ -92,13 +92,13 @@ func TestResample_SwapsBGRAAndAverages(t *testing.T) {
 		10, 20, 30, 0, 50, 60, 70, 0, 99, 99,
 	}
 
-	out := frame.Resample(pix, len(pix), 2, 1, frame.BGRA, 2)
+	out := pixels.Resample(pix, len(pix), 2, 1, pixels.BGRA, 2)
 
 	if got, want := out.RGBAAt(0, 0), (color.RGBA{50, 40, 30, 255}); got != want {
 		t.Errorf("Resample(BGRA, 2) = %v, want red and blue swapped and averaged %v", got, want)
 	}
 
-	copied := frame.Resample(pix, len(pix), 2, 1, frame.BGRA, 1)
+	copied := pixels.Resample(pix, len(pix), 2, 1, pixels.BGRA, 1)
 	if got, want := copied.RGBAAt(1, 0), (color.RGBA{70, 60, 50, 255}); got != want {
 		t.Errorf("Resample(BGRA, 1) = %v, want %v", got, want)
 	}

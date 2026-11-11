@@ -9,7 +9,7 @@ import (
 	"math"
 
 	"github.com/LouYuanbo1/neru-core/errs"
-	pixels "github.com/LouYuanbo1/neru-core/vision/frame"
+	"github.com/LouYuanbo1/neru-core/vision/pixels"
 )
 
 // inkStep is the smallest per-channel difference between neighboring pixels

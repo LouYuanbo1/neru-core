@@ -109,7 +109,7 @@ func (api *frameworks) newRequest(name string) (uintptr, error) {
 	return request, nil
 }
 
-// contextError converts a finished context into the error the ocr contract
+// contextError converts a finished context into the error the engine contract
 // names for it: a deadline is CodeTimeout, a cancellation
 // CodeContextCanceled. A live context yields nil.
 func contextError(ctx context.Context) error {
