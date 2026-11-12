@@ -79,6 +79,22 @@
 | 屏幕捕获：KDE portal + PipeWire（原生流） | — | 不需要 | KWin ScreenShot2 无需 PipeWire 即可返回相同帧 |
 | 捕获时排除自身窗口 | `vision/capture` | done | Windows 的 `ExcludeOwnWindows` 已宿主机测试；macOS 隐含在 ScreenCaptureKit 路径中；Linux 无对应物 |
 
+## 窗口管理
+
+| 特性 | 包 | 状态 | 验证 |
+| --- | --- | --- | --- |
+| 枚举所有进程的可见顶层窗口 | `window`（Windows） | done | windows 单元测试、宿主机实机运行 |
+| 前台窗口 | `window`（Windows） | done | 宿主机实机运行 |
+| 按 id / pid / 应用 / 标题激活并复核 | `window`（Windows） | done | 在前台锁允许时实机验证；否则以 `CodeAccessibilityFailed` 拒绝 |
+| 移动 / 缩放窗口（补偿 DWM 边框） | `window`（Windows） | done | 宿主机实机验证 |
+| 窗口枚举与激活 | `window`（macOS） | done | darwin 构建/vet；需要实机运行 |
+| 移动 / 缩放窗口（`AXPosition`/`AXSize`） | `window`（macOS） | done | darwin 构建/vet；需要实机运行 |
+| 窗口枚举与激活 | `window`（X11） | done | linux amd64/arm64 构建/vet；需要实机运行 |
+| 移动 / 缩放窗口（`_NET_MOVERESIZE_WINDOW`） | `window`（X11） | done | linux amd64/arm64 构建/vet；需要实机运行 |
+| Wayland 窗口管理 | — | 不支持 | 没有可移植协议；`CodeNotSupported` |
+
+Neru 本身只需要焦点窗口的矩形（由合成器桥接提供），并没有整个桌面的窗口列表或激活能力。因此 `window` 是新增能力而不是抽取，但它保持了本模块一致的"门面 → 后端"形态。
+
 ## 剩余工作
 
 1. **在目标操作系统上的实机运行。** 每个特性均已实现、针对所有目标平台进行了编译与审查，逻辑也有单元测试；macOS 专用路径与 Linux 专用路径仍需按照 `docs/LIVE-VERIFICATION.md` 各进行一次手动运行，才能称得上端到端验证通过。
@@ -94,6 +110,7 @@
 | `accessibility/ax` | 仅契约 |
 | `accessibility/{darwin,linux,windows}` | 单平台的原生绑定 |
 | `accessibility/linux/compositor` | D-Bus/CLI 合成器桥接（仅 Linux） |
+| `window` | 桌面窗口枚举、激活与摆放；单平台后端 |
 | `element`、`action`、`errs` | 纯 Go，无原生绑定 |
 | `vision`、`vision/contour`、`vision/segment`、`vision/pixels` | 纯 Go 检测器与管道 |
 | `vision/capture` | 平台捕获；`vision/capture/wayland` 仅限 Linux |

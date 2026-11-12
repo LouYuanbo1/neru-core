@@ -91,6 +91,25 @@ the host-runnable vision tests.
 | Screen capture: KDE portal + PipeWire (native stream) | — | not needed | KWin ScreenShot2 returns the same frame without PipeWire |
 | Capture excluding own windows | `vision/capture` | done | Windows `ExcludeOwnWindows` host-tested; macOS implicit in the ScreenCaptureKit path; Linux has no equivalent |
 
+## Window management
+
+| Feature | Package | Status | Verification |
+| --- | --- | --- | --- |
+| Enumerate visible top-level windows, every process | `window` (Windows) | done | windows unit tests, live run on the host |
+| Foreground window | `window` (Windows) | done | live run on the host |
+| Activate by id / pid / application / title, verified | `window` (Windows) | done | live-verified when the foreground lock permits; otherwise refuses with `CodeAccessibilityFailed` |
+| Move / resize a window, DWM border compensated | `window` (Windows) | done | live-verified on the host |
+| Window enumeration and activation | `window` (macOS) | done | darwin build/vet; live run needed |
+| Move / resize a window (`AXPosition`/`AXSize`) | `window` (macOS) | done | darwin build/vet; live run needed |
+| Window enumeration and activation | `window` (X11) | done | linux build/vet on amd64 and arm64; live run needed |
+| Move / resize a window (`_NET_MOVERESIZE_WINDOW`) | `window` (X11) | done | linux build/vet on amd64 and arm64; live run needed |
+| Wayland window management | — | not supported | no portable protocol; `CodeNotSupported` |
+
+Neru itself only needs the focused window's frame, which its compositor bridge
+supplies; it has no desktop-wide window list or activation. `window` therefore
+adds a capability rather than extracting one, and it keeps the same facade →
+backend shape as the rest of the module.
+
 ## Remaining work
 
 1. **Live runs on the target OSes.** Every feature is implemented, compiled and
@@ -113,6 +132,7 @@ only for what it uses:
 | `accessibility/ax` | contract only |
 | `accessibility/{darwin,linux,windows}` | one platform's native bindings |
 | `accessibility/linux/compositor` | D-Bus/CLI compositor bridge (Linux only) |
+| `window` | desktop window enumeration, activation and placement; one platform's backend |
 | `element`, `action`, `errs` | pure Go, no native bindings |
 | `vision`, `vision/contour`, `vision/segment`, `vision/pixels` | pure Go detectors and pipeline |
 | `vision/capture` | platform capture; `vision/capture/wayland` only on Linux |

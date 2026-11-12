@@ -4,10 +4,12 @@
 [![中文](https://img.shields.io/badge/Language-%E4%B8%AD%E6%96%87-red.svg)](./README_zh.md)
 
 A pure-Go library for reading the desktop's accessibility tree, detecting UI
-targets from pixels, and injecting pointer input.
+targets from pixels, injecting pointer input, and enumerating, switching, moving
+or resizing desktop windows.
 
 It is the accessibility (AX) and vision half of [Neru](https://github.com/y3owk1n/neru),
-extracted into a public module. Every platform backend is written without CGo:
+extracted into a public module, plus desktop window management, which Neru
+itself does not need. Every platform backend is written without CGo:
 macOS and Linux bind the system libraries at run time with
 [`purego`](https://github.com/ebitengine/purego), Windows uses the standard
 library's Win32/COM syscall surface, and Linux screen capture speaks the X11
@@ -107,6 +109,7 @@ err := client.PerformAction(action.TypeLeftClick, target.Point, true, 0)
 | `accessibility/windows` | Windows backend: UI Automation through COM, input through `SendInput`. |
 | `accessibility/linux` | Linux backend: AT-SPI over D-Bus, input through X11/XTest, Wayland input through wlroots/libei, all via `purego`. |
 | `accessibility/linux/compositor` | Compositor bridges for focus and window origin: KWin, GNOME Shell, niri, sway, Hyprland, COSMIC. |
+| `window` | Desktop window management: enumerate top-level windows, read the frontmost one, activate one by ID / PID / application / title, and move or resize it. Win32, macOS accessibility and X11 EWMH backends. |
 | `element` | Neutral element model, the role vocabulary, native role mappers for AX / AT-SPI / UIA, and spatial snapping (`Nearest`, `Toward`). |
 | `action` | Platform-neutral mouse action model and modifier bitmask. |
 | `errs` | Small error vocabulary with codes (`CodeNotSupported`, `CodeAccessibilityFailed`, …). |
@@ -242,6 +245,78 @@ for the auxiliary surfaces, and `accessibility.Warmer` for input warm-up.
 `accessibility.SurfaceNodes` and `accessibility.WarmUp` type-assert to them, so
 the base contract stays small. `examples/custom-backend` is a complete minimal
 backend: a window, a node, and `CodeNotSupported` for everything else.
+
+## Desktop windows (window)
+
+`window` is the window-management half of the module: it enumerates the
+desktop's top-level windows, reports the frontmost one, brings a chosen window to
+the foreground, and moves or resizes it. The platform work sits behind one
+contract, so a caller never writes a Win32 `EnumWindows` callback, an
+accessibility window walk or an EWMH client message itself.
+
+```go
+manager, err := window.New(window.Options{})
+if err != nil {
+	return err
+}
+defer manager.Close()
+
+windows, err := manager.List(ctx) // front to back, minimized windows included
+for _, w := range windows {
+	fmt.Println(w.ID, w.PID, w.Application, w.Title, w.Bounds, w.Minimized)
+}
+
+// Address a window by exactly what you have: ID, PID, application or title.
+activated, err := manager.Activate(ctx, window.Target{Application: "chrome.exe"})
+
+// Or bring it forward and give it a new frame in one call.
+placed, err := manager.SetBounds(
+	ctx,
+	window.Target{Application: "chrome.exe"},
+	image.Rect(0, 0, 960, 1440),
+)
+```
+
+| `window.Manager` method | Purpose |
+| --- | --- |
+| `List` | Every visible top-level window, front to back; minimized windows included. |
+| `Frontmost` | The window the user is working in; `CodeElementNotFound` when none has focus. |
+| `Activate` | Bring a target to the foreground, verified before it reports success. |
+| `SetBounds` | Restore, move, resize and raise a window; returns the frame the platform actually gave it. |
+| `Close` | Release the backend (the X11 display connection); idempotent. |
+
+`window.Info` carries `ID` (an opaque platform handle), `PID`, `Title`,
+`Application` (executable base name on Windows and Linux, bundle identifier on
+macOS), `Bounds` (physical screen pixels on Windows and X11, logical points on
+macOS; empty when minimized), `Minimized` and `Focused`.
+
+A `window.Target` selects by `ID`, `PID`, `Application` or `Title`, in that
+priority order; the first non-empty field decides. `Application` is compared
+case-insensitively and accepts a full executable path, and `Title` is a
+case-insensitive substring. Among several matches a focused window wins, then
+the frontmost one. `window.Find` applies that rule to any window slice, so a
+caller holding its own enumeration gets the same selection the backends use.
+
+`SetBounds` returns the frame the platform actually applied, which can differ
+from the rectangle it was asked for: a window with a minimum size keeps it, and a
+tiling window manager may lay it out its own way. Reporting the actual frame is
+honest; the requested one would be a guess. The foreground is requested as part
+of placing a window, but whether the platform granted it is reported in
+`Info.Focused` rather than treated as a failure of the placement. An X11 window
+manager that never applies the frame reports `CodeAccessibilityFailed`.
+
+`Options.IncludeUntitled` keeps windows whose title bar is empty; those are
+usually helper surfaces, so they are dropped by default. A window that has focus
+is always kept.
+
+Backends: Win32 `EnumWindows`, plus the `AttachThreadInput` sequence that gets
+`SetForegroundWindow` past Windows' foreground lock and a `SetWindowPos` that
+compensates for the invisible DWM resize borders; macOS accessibility window
+objects plus `NSRunningApplication` activation and `AXPosition`/`AXSize`; X11
+EWMH (`_NET_CLIENT_LIST`, `_NET_ACTIVE_WINDOW`, `_NET_MOVERESIZE_WINDOW`). A
+Wayland session exposes no portable window-management protocol, so it reports
+`CodeNotSupported` rather than presenting a partial XWayland list. `Activate`
+verifies the switch before reporting success.
 
 ## Elements
 
@@ -605,6 +680,7 @@ empty result.
 | `ocr-engines` | Explicit winrt / visionframework / tesseract selection per OS. |
 | `custom-engine` | Implementing `engine.Recognizer` without any native engine. |
 | `custom-backend` | Implementing `ax.Client`; the facade works against it unchanged. |
+| `windows` | Window enumeration, frontmost window, activation by title, and placement. |
 | `compositor` | Wayland window-origin placement math. |
 
 ## Platform support
@@ -614,6 +690,8 @@ empty result.
 | Read accessibility tree | AX (ApplicationServices) | AT-SPI (D-Bus) | UI Automation (COM) |
 | Clickable-node scan | yes | yes | yes |
 | Frontmost window / app | yes | yes, compositor-first | yes |
+| Window enumeration / activation | AX windows + `NSRunningApplication` | EWMH over X11 | `EnumWindows` + `SetForegroundWindow` |
+| Window move / resize | `AXPosition` / `AXSize` | `_NET_MOVERESIZE_WINDOW` | `SetWindowPos` (DWM border compensated) |
 | Menu bar scan | yes | — | — |
 | Dock / Notification Center / Stage Manager / PiP / screen-capture UI | yes (`SurfaceNodes`) | — | — |
 | Mission Control windows + Spaces bar | yes | — | — |
@@ -634,7 +712,13 @@ Known limits, stated by the backends themselves:
   macOS 14 and newer, which is fast and leaves the caller's own windows out;
   anywhere that fails it falls back to the `screencapture` utility, which is
   slower and includes them. Accessibility Zoom correction uses the same public
-  API plus the private SkyLight query Neru uses.
+  API plus the private SkyLight query Neru uses. Window enumeration and
+  activation read AX window objects, so they need the Accessibility permission
+  and report `CodeAccessibilityDenied` without it; a minimized window is still
+  listed, and its bounds are empty. Activation uses `NSRunningApplication`, then
+  raises the matched window with `AXRaise`. `SetBounds` writes `AXPosition` and
+  `AXSize`; a full-screen window refuses the write, and that refusal is reported
+  rather than retried.
 - **Linux.** Injection on X11 is XTest; on Wayland it is the wlroots virtual
   pointer where the compositor exposes it (sway, niri, Hyprland, wayfire) and
   libei through the RemoteDesktop portal otherwise (KDE, Mutter, cosmic). A
@@ -649,13 +733,27 @@ Known limits, stated by the backends themselves:
   injectable geometry source) COSMIC; X11 still infers focus from AT-SPI, so
   Chromium and Electron can occasionally resolve to a background window. The
   first tree call enables `org.a11y.Status`, and `Close` restores the session's
-  previous values.
+  previous values. Window management is EWMH over X11 only: a Wayland session
+  reports `CodeNotSupported` instead of a partial XWayland client list, and a
+  window's bounds are its client area, not the decorations the window manager
+  draws around it. `SetBounds` is a `_NET_MOVERESIZE_WINDOW` request, so a tiling
+  or snapping manager may apply its own rectangle; a request the manager never
+  applies is reported as `CodeAccessibilityFailed`.
 - **Windows.** There is no menu-bar or Mission Control analogue. Clicking is
   coordinate injection, not a UIA Invoke, so it behaves like a real mouse. Each
   query creates and releases its own UIA client object, so no COM object is
   shared across goroutines. `capture.ExcludeOwnWindows` marks the process's
   top-level windows with `WDA_EXCLUDEFROMCAPTURE` (Windows 10 2004+), so a hint
-  overlay does not appear in the frame it detects over.
+  overlay does not appear in the frame it detects over. Window enumeration walks
+  `EnumWindows` once, skips DWM-cloaked windows (UWP ghosts), and reports DWM's
+  extended frame bounds rather than the invisible resize borders. Activation
+  un-minimizes first, then defeats the foreground lock by attaching to the
+  foreground thread's input queue; a window on another virtual desktop is still
+  refused, and the call reports that rather than claiming success. A window
+  whose process cannot be opened (an elevated application) is listed with an
+  empty `Application`. `SetBounds` gives the window the frame the caller names,
+  not a few pixels inside it: `SetWindowPos` addresses the window rectangle, so
+  the backend adds the invisible DWM resize borders back before moving it.
 
 ## Design notes
 
@@ -693,6 +791,16 @@ accessibility call, reads text before returning, and hit-tests each candidate
 against the window server so covered controls are not hinted. `SkipHitTest`
 trades that precision for one round trip per candidate. `MaxDepth` and
 `MaxNodes` bound a pathological tree.
+
+**One window contract, three mechanisms.** `window` keeps the platform's
+vocabulary out of the API: no handle type, no XID, no AXUIElement crosses it,
+only an opaque `Info.ID`. The backends differ far more than the accessibility
+ones — Win32 enumerates the whole desktop in one callback pass, needs a
+thread-attachment dance to take the foreground and compensates DWM's invisible
+borders before `SetWindowPos`; macOS reads AX windows per application, activates
+through AppKit and writes `AXPosition`/`AXSize`; X11 reads an EWMH property and
+sends `_NET_ACTIVE_WINDOW` or `_NET_MOVERESIZE_WINDOW` client messages — which is
+exactly why none of that is the caller's problem.
 
 ## Development
 
