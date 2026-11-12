@@ -3,9 +3,9 @@
 [![English](https://img.shields.io/badge/Language-English-blue.svg)](./README.md)
 [![中文](https://img.shields.io/badge/Language-%E4%B8%AD%E6%96%87-red.svg)](./README_zh.md)
 
-一个纯 Go 编写的库，用于读取桌面辅助功能树（Accessibility Tree）、从像素中检测 UI 目标，并注入指针输入。
+一个纯 Go 编写的库，用于读取桌面辅助功能树（Accessibility Tree）、从像素中检测 UI 目标、注入指针输入，以及枚举、切换、移动或缩放桌面窗口。
 
-它是 [Neru](https://github.com/y3owk1n/neru) 的辅助功能（AX）与视觉（vision）部分，被抽取为公开模块。每个平台的后端均不使用 CGo 编写：macOS 和 Linux 在运行时通过
+它是 [Neru](https://github.com/y3owk1n/neru) 的辅助功能（AX）与视觉（vision）部分，被抽取为公开模块，并额外提供 Neru 本身不需要的桌面窗口管理。每个平台的后端均不使用 CGo 编写：macOS 和 Linux 在运行时通过
 [`purego`](https://github.com/ebitengine/purego) 绑定系统库，Windows 使用标准库的 Win32/COM syscall 接口，Linux 屏幕捕获则直接使用 X11 线协议通信。导入 `neru-core` 的程序仍然是一个纯 Go 二进制文件，可以从任意宿主机交叉编译，且始终不需要 C 工具链。
 
 ```
@@ -101,6 +101,7 @@ err := client.PerformAction(action.TypeLeftClick, target.Point, true, 0)
 | `accessibility/windows` | Windows 后端：通过 COM 使用 UI Automation，通过 `SendInput` 实现输入。 |
 | `accessibility/linux` | Linux 后端：通过 D-Bus 使用 AT-SPI，通过 X11/XTest 实现输入，通过 wlroots/libei 实现 Wayland 输入，全部通过 `purego` 实现。 |
 | `accessibility/linux/compositor` | 用于焦点与窗口原点的合成器桥接：KWin、GNOME Shell、niri、sway、Hyprland、COSMIC。 |
+| `window` | 桌面窗口管理：枚举顶层窗口、读取前台窗口、按 ID / PID / 应用 / 标题激活，以及移动/缩放窗口。后端分别是 Win32、macOS 辅助功能与 X11 EWMH。 |
 | `element` | 中立元素模型、角色词汇表、AX / AT-SPI / UIA 的原生角色映射，以及空间吸附（`Nearest`、`Toward`）。 |
 | `action` | 平台无关的鼠标动作模型与修饰键位掩码。 |
 | `errs` | 带错误码的小型错误词汇表（`CodeNotSupported`、`CodeAccessibilityFailed` 等）。 |
@@ -216,6 +217,51 @@ for _, surface := range []ax.Surface{
 ### 编写后端
 
 实现 `ax.Client` 即可。`Client` 是一个接口，平台能回答的方法写真实现，不能回答的返回 `errs.CodeNotSupported`，而不是假装成功。可选能力是独立接口：`ax.SurfaceProvider` 对应辅助表面，`accessibility.Warmer` 对应输入预热。`accessibility.SurfaceNodes` 与 `accessibility.WarmUp` 通过类型断言访问它们，因此基础契约保持精简。`examples/custom-backend` 是一个完整的最小后端：一个窗口、一个节点，其余返回 `CodeNotSupported`。
+
+## 窗口（window）
+
+`window` 是本模块负责窗口管理的一半：枚举桌面顶层窗口、读取前台窗口、把指定窗口切到前台，以及移动/缩放窗口。所有平台机制都藏在一个契约后面，调用方不需要自己写 Win32 的 `EnumWindows` 回调、macOS 的 AX 窗口遍历或 EWMH 客户端消息。
+
+```go
+manager, err := window.New(window.Options{})
+if err != nil {
+	return err
+}
+defer manager.Close()
+
+windows, err := manager.List(ctx) // 前台到后台，含最小化窗口
+for _, w := range windows {
+	fmt.Println(w.ID, w.PID, w.Application, w.Title, w.Bounds, w.Minimized)
+}
+
+// 手里有什么就用什么定位：ID、PID、应用名或标题。
+activated, err := manager.Activate(ctx, window.Target{Application: "chrome.exe"})
+
+// 或者一次调用完成"切到前台 + 摆到指定矩形"。
+placed, err := manager.SetBounds(
+	ctx,
+	window.Target{Application: "chrome.exe"},
+	image.Rect(0, 0, 960, 1440),
+)
+```
+
+| `window.Manager` 方法 | 用途 |
+| --- | --- |
+| `List` | 所有可见顶层窗口，前台到后台，含最小化窗口。 |
+| `Frontmost` | 用户正在操作的窗口；没有窗口获得焦点时返回 `CodeElementNotFound`。 |
+| `Activate` | 把目标窗口切到前台，并在复核切换生效后才报告成功。 |
+| `SetBounds` | 还原、移动、缩放并抬起窗口；返回平台实际给出的矩形。 |
+| `Close` | 释放后端（X11 的 display 连接）；幂等。 |
+
+`window.Info` 携带 `ID`（平台句柄，对调用方不透明）、`PID`、`Title`、`Application`（Windows/Linux 是可执行文件名，macOS 是 bundle id）、`Bounds`（Windows/X11 为物理像素，macOS 为辅助功能 API 报告的逻辑点；最小化时为空）、`Minimized` 与 `Focused`。
+
+`window.Target` 依次按 `ID`、`PID`、`Application`、`Title` 定位，取第一个非空字段。`Application` 忽略大小写并接受完整可执行文件路径，`Title` 是忽略大小写的子串。多个窗口同时匹配时前台窗口优先，其次是列表里最靠前的那个。`window.Find` 把这条规则应用在任意窗口切片上，因此自带枚举结果的调用方也能得到与后端一致的选中结果。
+
+`SetBounds` 返回平台实际应用的矩形，它可能与请求值不同：有最小尺寸限制的窗口会保留自己的尺寸，平铺式窗口管理器也可能按自己的布局摆放。返回实际值才是诚实的，返回请求值只是猜测。摆放时会顺带请求前台，但是否拿到由 `Info.Focused` 如实报告，而不是把前台失败当成摆放失败。X11 窗口管理器如果始终不应用这个矩形，会返回 `CodeAccessibilityFailed`。
+
+`Options.IncludeUntitled` 保留标题栏为空的窗口；它们通常是输入法候选框、拖拽预览之类的辅助窗口，所以默认丢弃。获得焦点的窗口无论有没有标题都会保留。
+
+后端：Win32 的 `EnumWindows`，加上绕开前台锁的 `AttachThreadInput` 序列，以及补偿 DWM 不可见缩放边框的 `SetWindowPos`；macOS 的辅助功能窗口对象、`NSRunningApplication` 激活与 `AXPosition`/`AXSize`；X11 的 EWMH（`_NET_CLIENT_LIST`、`_NET_ACTIVE_WINDOW`、`_NET_MOVERESIZE_WINDOW`）。Wayland 会话没有可移植的窗口管理协议，因此返回 `CodeNotSupported`，而不是把 XWayland 的不完整列表当成整个桌面。`Activate` 会在报告成功前复核激活结果。
 
 ## 元素（element）
 
@@ -524,6 +570,7 @@ if errs.IsNotSupported(err) {
 | `ocr-engines` | 按平台显式选择 winrt / visionframework / tesseract。 |
 | `custom-engine` | 不依赖任何原生引擎，实现 `engine.Recognizer`。 |
 | `custom-backend` | 实现 `ax.Client`；门面对它照常工作。 |
+| `windows` | 窗口枚举、前台窗口、按标题激活与摆放。 |
 | `compositor` | Wayland 窗口原点的换算规则。 |
 
 ## 平台支持
@@ -533,6 +580,8 @@ if errs.IsNotSupported(err) {
 | 读取辅助功能树 | AX（ApplicationServices） | AT-SPI（D-Bus） | UI Automation（COM） |
 | 可点击节点扫描 | 支持 | 支持 | 支持 |
 | 最前窗口 / 应用 | 支持 | 支持，优先使用合成器 | 支持 |
+| 窗口枚举 / 激活 | AX 窗口 + `NSRunningApplication` | X11 上的 EWMH | `EnumWindows` + `SetForegroundWindow` |
+| 窗口移动 / 缩放 | `AXPosition` / `AXSize` | `_NET_MOVERESIZE_WINDOW` | `SetWindowPos`（补偿 DWM 边框） |
 | 菜单栏扫描 | 支持 | — | — |
 | Dock / 通知中心 / 台前调度 / 画中画 / 录屏 UI | 支持（`SurfaceNodes`） | — | — |
 | Mission Control 窗口与 Spaces 条 | 支持 | — | — |
@@ -546,9 +595,9 @@ if errs.IsNotSupported(err) {
 
 已知限制，由后端自己声明：
 
-- **macOS。** Neru 扫描的每个表面这里都能扫：最前窗口、菜单栏、Dock、通知中心、台前调度、画中画、录屏 UI 与 Mission Control。捕获在 macOS 14 及以上使用 ScreenCaptureKit，速度快且会排除调用方自己的窗口；失败时回退到 `screencapture` 工具，较慢且会包含自己的窗口。辅助功能缩放校正使用同一套公开 API，加上 Neru 使用的私有 SkyLight 查询。
-- **Linux。** X11 上的注入是 XTest；Wayland 上，合成器暴露 wlroots 虚拟指针时使用它（sway、niri、Hyprland、wayfire），否则通过 RemoteDesktop portal 使用 libei（KDE、Mutter、cosmic）。两者都不可用的会话返回 `CodeNotSupported`。当 `/dev/uinput` 可写时，uinput 滚轮可复现像素级精确的平滑滚动。捕获读取 X11 root、wlroots Wayland 会话中合成器的 wlr-screencopy 协议、KDE 上 KWin 的 ScreenShot2 接口（无提示、带元数据几何），或在其发送方白名单允许时使用 GNOME Shell 的 Screenshot 接口；否则回退到桌面 portal 的 `Screenshot` 接口（较慢，可能提示一次）。焦点与窗口原点来自 KWin、GNOME Shell、niri、sway、Hyprland 以及（通过可注入的几何来源）COSMIC 的合成器桥接；X11 仍从 AT-SPI 推断焦点，因此 Chromium 和 Electron 偶尔可能解析为后台窗口。第一次树调用会启用 `org.a11y.Status`，`Close` 会恢复会话之前的值。
-- **Windows。** 没有菜单栏或 Mission Control 的对应物。点击是坐标注入而非 UIA Invoke，因此其行为像真实鼠标。每次查询都会创建并释放自己的 UIA client 对象，因此没有 COM 对象会在 goroutine 之间共享。`capture.ExcludeOwnWindows` 使用 `WDA_EXCLUDEFROMCAPTURE`（Windows 10 2004+）标记进程的顶层窗口，使提示浮层不会出现在其检测的帧中。
+- **macOS。** Neru 扫描的每个表面这里都能扫：最前窗口、菜单栏、Dock、通知中心、台前调度、画中画、录屏 UI 与 Mission Control。捕获在 macOS 14 及以上使用 ScreenCaptureKit，速度快且会排除调用方自己的窗口；失败时回退到 `screencapture` 工具，较慢且会包含自己的窗口。辅助功能缩放校正使用同一套公开 API，加上 Neru 使用的私有 SkyLight 查询。窗口枚举、激活与摆放读取 AX 窗口对象，因此需要辅助功能权限，未授权时返回 `CodeAccessibilityDenied`；最小化窗口仍会被列出，其 `Bounds` 为空。激活先通过 `NSRunningApplication` 唤起应用，再用 `AXRaise` 抬起匹配到的窗口。`SetBounds` 写 `AXPosition` 与 `AXSize`；全屏窗口会拒绝这种写入，此时如实报错而不是反复重试。
+- **Linux。** X11 上的注入是 XTest；Wayland 上，合成器暴露 wlroots 虚拟指针时使用它（sway、niri、Hyprland、wayfire），否则通过 RemoteDesktop portal 使用 libei（KDE、Mutter、cosmic）。两者都不可用的会话返回 `CodeNotSupported`。当 `/dev/uinput` 可写时，uinput 滚轮可复现像素级精确的平滑滚动。捕获读取 X11 root、wlroots Wayland 会话中合成器的 wlr-screencopy 协议、KDE 上 KWin 的 ScreenShot2 接口（无提示、带元数据几何），或在其发送方白名单允许时使用 GNOME Shell 的 Screenshot 接口；否则回退到桌面 portal 的 `Screenshot` 接口（较慢，可能提示一次）。焦点与窗口原点来自 KWin、GNOME Shell、niri、sway、Hyprland 以及（通过可注入的几何来源）COSMIC 的合成器桥接；X11 仍从 AT-SPI 推断焦点，因此 Chromium 和 Electron 偶尔可能解析为后台窗口。第一次树调用会启用 `org.a11y.Status`，`Close` 会恢复会话之前的值。窗口管理只在 X11 上通过 EWMH 提供：Wayland 会话返回 `CodeNotSupported`，而不是把 XWayland 的不完整客户端列表当成答案；窗口的 `Bounds` 是客户区，不含窗口管理器绘制的装饰。`SetBounds` 发送的是 `_NET_MOVERESIZE_WINDOW` 请求，平铺/吸附式窗口管理器可能按自己的矩形摆放；管理器始终不应用请求时返回 `CodeAccessibilityFailed`。
+- **Windows。** 没有菜单栏或 Mission Control 的对应物。点击是坐标注入而非 UIA Invoke，因此其行为像真实鼠标。每次查询都会创建并释放自己的 UIA client 对象，因此没有 COM 对象会在 goroutine 之间共享。`capture.ExcludeOwnWindows` 使用 `WDA_EXCLUDEFROMCAPTURE`（Windows 10 2004+）标记进程的顶层窗口，使提示浮层不会出现在其检测的帧中。窗口枚举一次 `EnumWindows` 走完，跳过被 DWM cloaked 的窗口（UWP 幽灵窗口），位置取 DWM 的扩展边框而不是不可见的缩放边框。激活先还原最小化窗口，再通过 `AttachThreadInput` 加入前台线程的输入队列以绕开前台锁；位于其他虚拟桌面的窗口仍会被系统拒绝，此时如实报错而不是谎报成功。无法打开进程的窗口（如提权应用）会被列出，但 `Application` 为空。`SetBounds` 给窗口的是调用方点名的矩形，而不是往里缩几个像素：`SetWindowPos` 操作的是窗口矩形，所以后端会先把 DWM 不可见的缩放边框补偿回去。
 
 ## 设计说明
 
@@ -561,6 +610,8 @@ if errs.IsNotSupported(err) {
 **所有权。** `Window`、`App` 与 `Node` 持有一个平台引用，必须恰好释放一次（`Release`）。`FromNode` 会拷贝它需要的一切，因此调用方可以在转换后立即释放节点。元素不可变，可安全地在 goroutine 间共享。
 
 **延迟。** macOS 的遍历把元素的属性批量合并成一次辅助功能调用，在返回前读取文本，并对每个候选做窗口服务器命中测试，因此被遮挡的控件不会被提示。`SkipHitTest` 用这份精度换每个候选一次往返。`MaxDepth` 与 `MaxNodes` 约束病态的树。
+
+**一套窗口契约，三种机制。** `window` 把平台词汇挡在 API 之外：没有句柄类型、没有 XID、没有 AXUIElement，只有不透明的 `Info.ID`。三个窗口后端的差异比辅助功能后端更大——Win32 用一次回调遍历整个桌面，还要靠线程挂接夺取前台，并在 `SetWindowPos` 前补偿 DWM 的不可见边框；macOS 逐个应用读取 AX 窗口，通过 AppKit 激活，再写 `AXPosition`/`AXSize`；X11 读一条 EWMH 属性，再发 `_NET_ACTIVE_WINDOW` 或 `_NET_MOVERESIZE_WINDOW` 客户端消息——正因如此，这些都不该成为调用方的问题。
 
 ## 开发
 

@@ -41,6 +41,13 @@ Manual checks:
    display bounds, and the test process's own windows absent from the image.
    On macOS 13 or older the fast path reports `CodeNotSupported` and the
    `screencapture` fallback must still return a frame.
+8. Windows: `go run ./examples/windows` should list every application's windows
+   (minimized ones included, with empty bounds),
+   `go run ./examples/windows -title Settings` should bring the matching window
+   forward, and adding `-rect 0,0,960,900` should move and resize it. A
+   full-screen window refuses the AX writes, and that refusal is reported rather
+   than hidden. Without Accessibility permission, expect
+   `CodeAccessibilityDenied` rather than an empty list.
 
 Known non-goals: `screencapture` includes the caller's own windows (no
 ScreenCaptureKit content filter yet), and the private SkyLight zoom symbols may
@@ -66,6 +73,13 @@ Manual checks:
    writable it uses the hi-res wheel.
 4. `capture.CaptureScreen` should return a frame covering the output union,
    with `Scale` matching the output scale.
+5. On an X11 session, `go run ./examples/windows` should list every top-level
+   window (title, PID, application, client-area bounds),
+   `go run ./examples/windows -title <window title>` should raise and focus the
+   match, and `-rect 0,0,960,1440` should move and resize it to that client area.
+   On Wayland the same commands must report `CodeNotSupported` for window
+   management rather than a partial XWayland list. A tiling manager may apply its
+   own rectangle; the printed bounds are what it actually applied.
 
 ## Linux — KDE or GNOME Wayland session
 
@@ -96,19 +110,31 @@ Manual checks:
 ```bash
 go test -tags=integration ./accessibility/windows/
 go test -tags=integration ./vision/ocr/winrt/
+NERU_WINDOW_LIVE=1 go test -tags=integration -run 'TestManager_(Activate|SetBounds)' ./window/   # PowerShell: $env:NERU_WINDOW_LIVE='1'
 ```
 
 Manual checks:
 
 1. Run at medium integrity (a normal interactive desktop, not the sandbox here).
    At low integrity, UIPI blocks cross-process UIA and SendInput; the tests will
-   look empty rather than fail, which is the environment, not the backend.
+   look empty rather than fail, which is the environment, not the backend. The
+   window activation test skips itself unless `NERU_WINDOW_LIVE` is set because
+   a low-integrity process also cannot take the foreground: `AttachThreadInput`
+   is refused across integrity levels.
 2. `go run ./examples/hints` on Notepad, Settings (WinUI) and Chrome should
    list buttons/edit fields/list items.
 3. `capture.ExcludeOwnWindows()` followed by a capture with a visible overlay
    should omit the overlay (Windows 10 2004+).
 4. OCR: `winrt.New().Health(ctx)` should be nil with an English language pack;
    a frame with known text should return it with box coordinates in image space.
+5. Windows: `go run ./examples/windows` should list every visible top-level
+   window, including minimized ones with empty bounds,
+   `go run ./examples/windows -title 关于` (with `winver.exe` open) should
+   restore, raise and focus that window, and adding `-rect 120,90,500,400` should
+   move it to exactly that visible frame. With another application in front and
+   the user idle, activation should still succeed; with the foreground locked by
+   recent input it may report `CodeAccessibilityFailed`, which is the honest
+   answer rather than a false success.
 
 ## What a failure means
 

@@ -27,6 +27,7 @@ go test -tags=integration ./vision/capture/
 5. 开启辅助功能缩放：`WarmUp` 之后的点击仍应落在请求的点上（视口会先进行平移）。
 6. Vision OCR：用一张包含已知文本的截图运行 `go test -tags=integration ./vision/ocr/visionframework/`。
 7. ScreenCaptureKit：在 macOS 14+ 上运行 `go test -tags=integration -run SCK -v ./vision/capture/`；预期 Retina 缩放为 2、`Region` 等于逻辑显示边界、且测试进程自身的窗口不出现在图像中。在 macOS 13 或更旧版本上，快速路径会报告 `CodeNotSupported`，`screencapture` 回退仍必须返回一张截图。
+8. 窗口管理：`go run ./examples/windows` 应列出所有应用的窗口（含最小化窗口，其矩形为空），`go run ./examples/windows -title Settings` 应把匹配窗口切到前台并打印激活结果；再加 `-rect 0,0,960,900` 应移动并缩放该窗口。全屏窗口会拒绝 AX 写入，此时应如实报错而不是隐藏。未授予辅助功能权限时应得到 `CodeAccessibilityDenied`，而不是空列表。
 
 已知的非目标：`screencapture` 会包含调用方自身的窗口（尚无 ScreenCaptureKit 内容过滤器），且私有 SkyLight 缩放符号可能随 macOS 版本变化（后端会退化为普通定位）。
 
@@ -45,6 +46,7 @@ go test -tags=integration ./internal/uinput/
 2. `PerformAction(TypeLeftClick, …)` 应能点击原生 Wayland 客户端（而非仅 XWayland）。这是 wlrinject 路径。
 3. `Scroll(0, 120, 0)` 应能移动可滚动视图；当 `/dev/uinput` 可写时使用高分辨率滚轮。
 4. `capture.CaptureScreen` 应返回覆盖输出联合区域的帧，且 `Scale` 与输出缩放一致。
+5. 在 X11 会话中，`go run ./examples/windows` 应列出每个顶层窗口（标题、PID、应用、客户区矩形），`go run ./examples/windows -title <窗口标题>` 应抬起并聚焦匹配窗口，再加 `-rect 0,0,960,1440` 应把它移动并缩放到该客户区。Wayland 下同样的命令必须在窗口管理上返回 `CodeNotSupported`，而不是给出不完整的 XWayland 列表。平铺式窗口管理器可能按自己的矩形摆放，打印出来的应是实际应用的矩形。
 
 ## Linux — KDE 或 GNOME Wayland 会话
 
@@ -68,14 +70,16 @@ go test -tags=integration ./vision/capture/portal/   # 回退
 ```bash
 go test -tags=integration ./accessibility/windows/
 go test -tags=integration ./vision/ocr/winrt/
+$env:NERU_WINDOW_LIVE='1'; go test -tags=integration -run 'TestManager_(Activate|SetBounds)' ./window/
 ```
 
 手动检查：
 
-1. 以中等完整性级别运行（正常的交互式桌面，而非此处的沙箱）。在低完整性下，UIPI 会阻止跨进程 UIA 与 SendInput；测试会表现为“空”而非失败，这是环境所致，而非后端问题。
+1. 以中等完整性级别运行（正常的交互式桌面，而非此处的沙箱）。在低完整性下，UIPI 会阻止跨进程 UIA 与 SendInput；测试会表现为“空”而非失败，这是环境所致，而非后端问题。窗口激活测试只有在设置 `NERU_WINDOW_LIVE` 后才会运行，因为低完整性进程同样无法夺取前台：跨完整性级别的 `AttachThreadInput` 会被拒绝。
 2. 在记事本、设置（WinUI）与 Chrome 上运行 `go run ./examples/hints`，应列出按钮/编辑框/列表项。
 3. `capture.ExcludeOwnWindows()` 之后，在存在可见浮层的情况下捕获，应省略该浮层（Windows 10 2004+）。
 4. OCR：在装有英文语言包时，`winrt.New().Health(ctx)` 应为 nil；包含已知文本的帧应返回该文本，并附带图像空间中的框坐标。
+5. 窗口管理：`go run ./examples/windows` 应列出所有可见顶层窗口（含矩形为空的最小化窗口）；打开 `winver.exe` 后运行 `go run ./examples/windows -title 关于`，应还原、抬起并聚焦该窗口；再加 `-rect 120,90,500,400`，应把它移动到恰好这个可见矩形——返回值是窗口实际得到的矩形。当另一个应用在前台且用户空闲时，激活仍应成功；若前台锁因刚发生的输入而生效，则可能返回 `CodeAccessibilityFailed`，这是如实报告而不是谎报成功。
 
 ## 失败意味着什么
 
